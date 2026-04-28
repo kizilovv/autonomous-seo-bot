@@ -1,0 +1,43 @@
+{
+  "name": "autonomous-seo-bot",
+  "version": "0.1.0",
+  "description": "Autonomous SEO content bot — pulls GSC + GA4, classifies opportunities, generates rewrites via OpenRouter LLM tiers, applies low-risk changes through an audited SQLite CMS exposed over HTTP (read) + MCP (write).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "dev": "tsx watch src/index.ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "seed": "tsx scripts/seed-from-json.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "run-now": "tsx scripts/run-now.ts"
+  },
+  "dependencies": {
+    "@google-analytics/data": "^5.2.1",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.0",
+    "@googleapis/searchconsole": "^4.0.0",
+    "google-auth-library": "^9.15.0",
+    "node-cron": "^3.0.3",
+    "openai": "^4.80.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.2",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

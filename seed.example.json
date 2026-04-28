@@ -1,0 +1,26 @@
+{
+  "en": {
+    "/": {
+      "title": "Acme — example homepage title",
+      "description": "Example homepage description (140-160 chars). State the outcome the visitor gets, mention the search query naturally.",
+      "h1": "Welcome to Acme",
+      "intro": "One paragraph of body intro that the bot may later append to.",
+      "keywords": ["acme", "example"],
+      "faq": [
+        { "q": "What is Acme?", "a": "Acme is an example product used in this seed file." }
+      ]
+    },
+    "/pricing": {
+      "title": "Acme pricing — plans, limits, billing",
+      "description": "Compare Acme plans, see per-seat limits, monthly vs annual billing."
+    }
+  },
+  "ru": {
+    "/": {
+      "title": "Acme — пример главной страницы",
+      "description": "Пример описания главной (140-160 символов).",
+      "h1": "Acme — главная",
+      "intro": "Один абзац вступления, который бот может позже расширить."
+    }
+  }
+}
