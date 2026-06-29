@@ -1,5 +1,5 @@
-// Minimal Telegram client. HTML parse mode, retry-safe, never throws upstream.
-// Bot is optional — if TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are unset, all sends no-op.
+// Minimal Telegram client. Reuses the vps-monitor bot — sends to Artem's DM.
+// HTML parse mode, retry-safe (network blips) but never throws upstream.
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 
@@ -14,7 +14,7 @@ export interface SendOptions {
 
 export async function sendMessage(text: string, opts: SendOptions = {}): Promise<{ message_id?: number } | null> {
   if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
-    logger.debug("telegram disabled (missing token or chat_id)");
+    logger.warn("telegram disabled (missing token or chat_id)");
     return null;
   }
   const url = `${BASE}/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -39,6 +39,7 @@ export async function sendMessage(text: string, opts: SendOptions = {}): Promise
       });
       const j = (await res.json()) as { ok: boolean; description?: string; result?: { message_id: number } };
       if (j.ok) return { message_id: j.result?.message_id };
+      // 4xx → no retry (bad input)
       if (res.status >= 400 && res.status < 500) {
         logger.warn({ status: res.status, desc: j.description }, "telegram 4xx — not retrying");
         return null;

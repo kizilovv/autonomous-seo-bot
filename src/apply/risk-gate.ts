@@ -60,6 +60,11 @@ export function decide(opp: OpportunityRow, autoCountToday: number): GateResult 
     case "schema_gap":
       return { decision: "review", reason: "schema changes need manual approval" };
 
+    case "competitor_gap":
+      // Always review — gap kw require human decision on target URL strategy:
+      // existing /items/{slug} vs new hub vs listicle. Bot can't pick.
+      return { decision: "review", reason: "competitor_gap: human must pick target page strategy" };
+
     default:
       return { decision: "review", reason: "unknown opportunity kind" };
   }

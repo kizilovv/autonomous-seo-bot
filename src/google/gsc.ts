@@ -130,3 +130,38 @@ export async function inspectUrl(siteUrl: string, inspectionUrl: string) {
   });
   return r.inspectionResult;
 }
+
+/**
+ * Submit a sitemap URL to GSC. Triggers Google to recrawl entries listed there.
+ * Idempotent — safe to call daily for the same sitemap URL.
+ */
+export async function submitSitemap(siteUrl: string, feedpath: string): Promise<void> {
+  const path = `/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/sitemaps/${encodeURIComponent(feedpath)}`;
+  // PUT — empty body, idempotent.
+  const token = await bearer();
+  const res = await fetch(`${SC_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Length": "0" },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`sitemap submit ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+
+/** Push a "url updated" notification for fast recrawl. Works only for JobPosting and BroadcastEvent
+ * schema markup — for general SEO, prefer indexnow + sitemap.submit. */
+export async function indexingApiPing(url: string, type: "URL_UPDATED" | "URL_DELETED" = "URL_UPDATED"): Promise<void> {
+  const token = await bearer();
+  const res = await fetch("https://indexing.googleapis.com/v3/urlNotifications:publish", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ url, type }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`indexing api ${res.status}: ${body.slice(0, 200)}`);
+  }
+}

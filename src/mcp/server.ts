@@ -1,6 +1,6 @@
 // MCP server — write interface for agents.
-// Runs over stdio. Connect from any MCP client (Claude Code, Cursor, etc.) via:
-//   node dist/src/mcp/server.js
+// Runs over stdio. Connect from any MCP client (Claude Code, Cursor, etc.)
+// via:  bash -c 'cd /srv/csboard-seo && node dist/src/mcp/server.js'
 //
 // All write operations go through here. The HTTP API has zero write surface.
 
@@ -21,7 +21,6 @@ import {
   getContentHistory,
 } from "../db/repo.js";
 import { logger } from "../logger.js";
-import { config } from "../config.js";
 
 const TOOLS = [
   {
@@ -40,8 +39,8 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        locale: { type: "string" },
-        path: { type: "string", description: "Route path, e.g. /pricing or /items/foo" },
+        locale: { type: "string", enum: ["en", "ru"] },
+        path: { type: "string", description: "Route path, e.g. /sell or /items/ak-47-redline" },
       },
       required: ["locale", "path"],
       additionalProperties: false,
@@ -50,11 +49,11 @@ const TOOLS = [
   {
     name: "seo.update_content",
     description:
-      "Create or replace one SEO field for a page. Examples of `field`: title, description, h1, intro, faq, keywords, intro_extra. `value` must match the field shape: string for title/description/h1/intro/intro_extra, array of {q,a} for faq, array of strings for keywords.",
+      "Create or replace one SEO field for a page. Examples of `field`: title, description, h1, intro, faq, keywords. `value` must match the field shape: string for title/description/h1/intro, array of {q,a} for faq, array of strings for keywords.",
     inputSchema: {
       type: "object",
       properties: {
-        locale: { type: "string" },
+        locale: { type: "string", enum: ["en", "ru"] },
         path: { type: "string" },
         field: {
           type: "string",
@@ -62,12 +61,12 @@ const TOOLS = [
         },
         value: {
           description:
-            "string for title/description/h1/intro/intro_extra, array of {q,a} objects for faq, array of strings for keywords",
+            "string for title/description/h1/intro, array of {q,a} objects for faq, array of strings for keywords",
         },
         reason: { type: "string", description: "Why this change (used in audit log)" },
         source: {
           type: "string",
-          description: "Identity of the writer, e.g. 'agent:rank-pusher' or 'manual:human'",
+          description: "Identity of the writer, e.g. 'agent:rank-pusher' or 'manual:artem'",
           default: "agent:unknown",
         },
       },
@@ -105,7 +104,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        locale: { type: "string" },
+        locale: { type: "string", enum: ["en", "ru"] },
         path: { type: "string" },
         limit: { type: "number", default: 50 },
       },
@@ -119,7 +118,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        locale: { type: "string" },
+        locale: { type: "string", enum: ["en", "ru"] },
         path: { type: "string" },
         priority: { type: "number", minimum: 0, maximum: 1, nullable: true },
         changefreq: {
@@ -143,7 +142,7 @@ export async function startMcpServer() {
   runMigrations();
 
   const server = new Server(
-    { name: config.SERVICE_NAME, version: "0.1.0" },
+    { name: "csboard-seo", version: "0.1.0" },
     { capabilities: { tools: {} } }
   );
 

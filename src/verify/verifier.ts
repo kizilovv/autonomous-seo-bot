@@ -1,16 +1,16 @@
 // Phase 4 — verify recently applied changes.
 //
-// Cheap & data-bound checks (no Lighthouse — too heavy):
+// Cheap & data-bound checks (no Lighthouse for now, that's heavier):
 //   1) Hit the live page and check it returns 2xx/3xx.
-//   2) Verify the new value is rendered in the HTML (substring contains).
+//   2) Verify the new value is rendered in the HTML (string contains).
 //   3) (Optional, sparing) Use GSC URL Inspection API to confirm the page is still indexed.
-//      Self-rate-limited to a few inspects per run.
+//      We rate-limit ourselves to a few inspects per day to avoid burning quota.
 
 import { getDb } from "../db/connection.js";
 import { logger } from "../logger.js";
 import { sendMessage, esc } from "../notify/telegram.js";
-import { gscSites, siteUrlMap, config } from "../config.js";
-import { inspectUrl } from "../google/gsc.js";
+import { gscSites } from "../config.js";
+import { inspectUrl, submitSitemap } from "../google/gsc.js";
 
 interface VerifyStats {
   checked: number;
@@ -19,7 +19,13 @@ interface VerifyStats {
   inspected: number;
   errors: number;
   details: string[];
+  sitemaps?: Array<{ site: string; sitemap: string; ok: boolean; err?: string }>;
 }
+
+const SITE_URL_FOR_LOCALE: Record<string, string> = {
+  en: "https://csboard.com",
+  ru: "https://csboard.trade",
+};
 
 interface AppliedRow {
   id: number;
@@ -46,10 +52,7 @@ function appliedSince(hoursAgo: number, limit = 50): AppliedRow[] {
 
 async function pageContains(url: string, needle: string): Promise<{ ok: boolean; status: number }> {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": `${config.SERVICE_NAME}/0.1` },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await fetch(url, { headers: { "User-Agent": "csboard-seo-bot/0.1" }, signal: AbortSignal.timeout(15_000) });
     if (!res.ok && res.status >= 400) return { ok: false, status: res.status };
     const html = await res.text();
     const found = html.toLowerCase().includes(needle.toLowerCase());
@@ -64,20 +67,18 @@ export async function runVerify(): Promise<VerifyStats> {
   const stats: VerifyStats = { checked: 0, rendered: 0, not_rendered: 0, inspected: 0, errors: 0, details: [] };
   const recent = appliedSince(24);
   const sites = gscSites();
-  const localeUrls = siteUrlMap();
-  let inspectsLeft = 5;
+  let inspectsLeft = 5; // soft cap per run
 
   for (const row of recent) {
     stats.checked++;
-    const baseUrl = localeUrls[row.locale] ?? config.PRIMARY_SITE_URL;
+    const baseUrl = SITE_URL_FOR_LOCALE[row.locale];
     if (!baseUrl) {
       stats.errors++;
       continue;
     }
-    // Build a URL preserving the locale segment if the site uses /<locale>/ prefix.
-    // If your site doesn't use locale prefixes, drop "/{locale}" below.
-    const url = `${baseUrl.replace(/\/$/, "")}/${row.locale}${row.path === "/" ? "" : row.path}`;
+    const url = `${baseUrl}/${row.locale}${row.path === "/" ? "" : row.path}`;
 
+    // Decode the value back to a string for substring matching.
     let needle = row.proposed_value;
     try {
       const parsed = JSON.parse(row.proposed_value);
@@ -100,6 +101,7 @@ export async function runVerify(): Promise<VerifyStats> {
       stats.details.push(`⚠ #${row.id} ${url} (status ${r.status}) — needle NOT in HTML`);
     }
 
+    // Sparing GSC URL Inspect — only for fields that affect SERP snippet.
     if (inspectsLeft > 0 && (row.field === "title" || row.field === "description")) {
       const site = sites.find((s) => s.replace(/^sc-domain:/, "") === new URL(baseUrl).hostname);
       if (site) {
@@ -117,16 +119,37 @@ export async function runVerify(): Promise<VerifyStats> {
     }
   }
 
-  if (stats.checked > 0) {
+  // Submit sitemaps to GSC daily — pings Google to recrawl listed URLs.
+  // Idempotent, free, and the only public way to nudge Google's crawler now
+  // that the Indexing API is restricted to JobPosting/BroadcastEvent.
+  const sitemaps: Array<{ site: string; sitemap: string; ok: boolean; err?: string }> = [];
+  for (const site of sites) {
+    const host = site.replace(/^sc-domain:/, "");
+    const sitemapUrl = `https://${host}/sitemap.xml`;
+    try {
+      await submitSitemap(site, sitemapUrl);
+      sitemaps.push({ site, sitemap: sitemapUrl, ok: true });
+      logger.info({ site, sitemapUrl }, "sitemap submitted");
+    } catch (e) {
+      sitemaps.push({ site, sitemap: sitemapUrl, ok: false, err: (e as Error).message });
+      logger.warn({ site, err: (e as Error).message }, "sitemap submit failed");
+    }
+  }
+
+  if (stats.checked > 0 || sitemaps.length) {
+    const sitemapLine = sitemaps.length
+      ? `<b>Sitemaps submitted:</b> ${sitemaps.filter((s) => s.ok).length}/${sitemaps.length}`
+      : "";
     const summary = [
       `🔬 <b>SEO verify (last 24h)</b>`,
       `<b>Checked:</b> ${stats.checked} · <b>OK:</b> ${stats.rendered} · <b>missing:</b> ${stats.not_rendered}`,
       stats.inspected ? `<b>GSC inspects:</b> ${stats.inspected}` : "",
+      sitemapLine,
       "",
       stats.details.slice(0, 10).map((d) => esc(d)).join("\n"),
       stats.details.length > 10 ? `<i>… and ${stats.details.length - 10} more</i>` : "",
     ].filter(Boolean).join("\n");
     await sendMessage(summary);
   }
-  return stats;
+  return { ...stats, sitemaps };
 }

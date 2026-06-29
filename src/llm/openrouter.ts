@@ -1,12 +1,6 @@
-// OpenRouter client with tier routing, response cache, and budget cap.
-//
-// Tier 1 = cheap / fast models (DeepSeek, Haiku, GPT-4o-mini). Used for snippet
-//          rewrites, FAQ items, intro paragraphs.
-// Tier 2 = mid-range (Sonnet 4 / 4.5). Used for body content (rank-push paragraphs).
-// Tier 3 = premium long-form (Sonnet 4.5 first). Used for full blog generation.
-//
-// Each tier is a fallback chain; the first model that responds wins. Costs are
-// estimated from token counts and recorded in `llm_spend` / `llm_spend_monthly`.
+// OpenRouter client with tier routing, cache, and budget cap.
+// Tier 1 = free / very cheap models (Haiku, DeepSeek, Llama 3.3, Gemini Flash).
+// Tier 2 = paid Sonnet for harder rewrites.
 import OpenAI from "openai";
 import crypto from "node:crypto";
 import { config } from "../config.js";
@@ -17,40 +11,48 @@ const client = new OpenAI({
   apiKey: config.OPENROUTER_API_KEY ?? "",
   baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: {
-    "HTTP-Referer": config.OPENROUTER_REFERER,
-    "X-Title": config.OPENROUTER_APP_TITLE,
+    "HTTP-Referer": "https://csboard.com",
+    "X-Title": "csboard-seo-bot",
   },
 });
 
 export type Tier = 1 | 2 | 3;
 
 // Per-tier model preference list. First model that responds successfully wins.
-// As of 2026 on OpenRouter:
-//   - meta-llama/llama-3.3-70b-instruct:free → strict 8 rpm rate limit (avoid for batch jobs)
+// As of 2026-04-28 on OpenRouter:
+//   - anthropic/claude-3.5-sonnet, gemini-2.0-flash-exp:free → 404 (no endpoint)
+//   - meta-llama/llama-3.3-70b-instruct:free → strict 8 rpm rate limit
 //   - deepseek/deepseek-chat → reliable, ~$0.27/M in, $1.10/M out
-//   - anthropic/claude-haiku-4.5 → reliable, mid-cost
-//   - anthropic/claude-sonnet-4(.5) → premium, ~$3-15/M
+//   - anthropic/claude-sonnet-4 / claude-sonnet-4.5 → premium, ~$3-5/M
 const TIER_MODELS: Record<Tier, string[]> = {
   1: [
+    // Cheapest first. v4-flash ≈ 3x cheaper than v3 chat with same quality for snippets.
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-chat-v3.1",
     "deepseek/deepseek-chat",
-    "anthropic/claude-haiku-4.5",
-    "openai/gpt-4o-mini",
   ],
   2: [
+    // Mid-quality longer rewrites. v4-pro is the new sweet spot — better than v3,
+    // ~3.5x cheaper than Sonnet 4.5 for similar output quality.
+    "deepseek/deepseek-v4-pro",
+    "deepseek/deepseek-v4-flash",
     "anthropic/claude-sonnet-4.5",
-    "anthropic/claude-sonnet-4",
-    "deepseek/deepseek-chat",
   ],
   3: [
+    // Long-form blog posts (1200-1800 words). v4-pro first — Sonnet 4.5 only as
+    // fallback. Cuts blog cost from ~$0.05 to ~$0.005 per post (~10x savings).
+    "deepseek/deepseek-v4-pro",
     "anthropic/claude-sonnet-4.5",
     "anthropic/claude-sonnet-4",
-    "deepseek/deepseek-chat",
   ],
 };
 
-// USD per 1M tokens — conservative ceilings per OpenRouter pricing 2026.
+// USD per 1M tokens — OpenRouter pricing 2026-05-04.
 const MODEL_COST_PER_M_TOKENS: Record<string, { in: number; out: number }> = {
-  "deepseek/deepseek-chat": { in: 0.27, out: 1.1 },
+  "deepseek/deepseek-v4-flash": { in: 0.14, out: 0.28 },
+  "deepseek/deepseek-v4-pro": { in: 0.435, out: 0.87 },
+  "deepseek/deepseek-chat-v3.1": { in: 0.15, out: 0.75 },
+  "deepseek/deepseek-chat": { in: 0.32, out: 0.89 },
   "openai/gpt-4o-mini": { in: 0.15, out: 0.6 },
   "anthropic/claude-haiku-4.5": { in: 1.0, out: 5.0 },
   "anthropic/claude-sonnet-4": { in: 3.0, out: 15.0 },
@@ -64,7 +66,7 @@ function estimateCost(model: string, tokensIn: number, tokensOut: number): numbe
 }
 
 function cacheKey(model: string, prompt: string): string {
-  return crypto.createHash("sha256").update(`${model}${prompt}`).digest("hex");
+  return crypto.createHash("sha256").update(`${model}${prompt}`).digest("hex");
 }
 
 export interface LlmCallArgs {
@@ -73,10 +75,12 @@ export interface LlmCallArgs {
   userPrompt: string;
   maxTokens?: number;
   temperature?: number;
-  /** Skip cache (e.g. caller explicitly wants a fresh attempt). */
+  /** Skip cache (e.g. user explicitly wants a fresh attempt). */
   noCache?: boolean;
   /** Reason — logged for accounting. */
   reason?: string;
+  /** Force JSON output mode where supported (Sonnet/GPT). */
+  jsonMode?: boolean;
 }
 
 export interface LlmResult {
@@ -113,6 +117,7 @@ export async function callLlm(args: LlmCallArgs): Promise<LlmResult> {
   const candidates = TIER_MODELS[args.tier];
   if (!candidates?.length) throw new Error(`no models configured for tier ${args.tier}`);
 
+  // Try cache against any tier-1 model in the prefer order.
   if (!args.noCache) {
     for (const m of candidates) {
       const k = cacheKey(m, fullPrompt);
@@ -126,18 +131,20 @@ export async function callLlm(args: LlmCallArgs): Promise<LlmResult> {
   let lastError: Error | null = null;
   for (const model of candidates) {
     try {
-      const completion = await client.chat.completions.create(
-        {
-          model,
-          temperature: args.temperature ?? 0.6,
-          max_tokens: args.maxTokens ?? 400,
-          messages: [
-            { role: "system", content: args.systemPrompt },
-            { role: "user", content: args.userPrompt },
-          ],
-        },
-        { timeout: 30_000 }
-      );
+      const baseParams = {
+        model,
+        temperature: args.temperature ?? 0.6,
+        max_tokens: args.maxTokens ?? 400,
+        messages: [
+          { role: "system" as const, content: args.systemPrompt },
+          { role: "user" as const, content: args.userPrompt },
+        ],
+      };
+      const params = args.jsonMode
+        // OpenRouter passes response_format through to providers that support it.
+        ? { ...baseParams, response_format: { type: "json_object" as const } }
+        : baseParams;
+      const completion = await client.chat.completions.create(params, { timeout: 60_000 });
       const text = completion.choices?.[0]?.message?.content?.trim() ?? "";
       if (!text) throw new Error("empty completion");
 

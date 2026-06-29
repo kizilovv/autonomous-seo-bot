@@ -1,25 +1,25 @@
 // Proposal generators. One function per opportunity kind. All call OpenRouter with
 // tight prompts and return strings ready to write into `content.value` (after JSON encode).
 //
-// Constraints baked into prompts:
-//   - Match brand voice from config.BRAND_BLURB — no marketing fluff
-//   - Mention only facts that are present in the brand blurb (anti-hallucination)
+// Constraints baked into prompts (anti "обоссанные лендинги"):
+//   - Match brand voice: terse, gamer-leaning, no marketing fluff
+//   - Mention real CSBoard facts (instant USDT, P2P, 36k+ skins, zero fees) only where true
 //   - Must answer query intent specifically — no generic platitudes
+//   - Cyrillic for ru locale, English for en
 
 import { callLlm, type LlmResult } from "../llm/openrouter.js";
 import type { OpportunityRow } from "../db/repo.js";
-import { config } from "../config.js";
 
-function brandBlurb(): string {
-  return config.BRAND_BLURB.trim() || "(no brand blurb configured — keep output strictly factual and tied to the search query)";
-}
-
-const FORBIDDEN_PHRASES_NOTE = `
-NEVER use any of these AI-cliché phrases or anything close: "in today's market", "ever-evolving", "delve into", "dive deep", "unleash", "elevate your game", "discover the world of", "welcome to the world of", "in the realm of", "look no further".
-NEVER greet the reader.
-NEVER include affiliate-style language.
-DO NOT invent features. Only reference facts already stated in the brand blurb above.
-`.trim();
+const BRAND_FACTS = `
+CSBoard (csboard.com / csboard.trade) is a P2P marketplace for CS2 (Counter-Strike 2) skin trading.
+Hard facts you can reference:
+- Instant USDT payouts via TRC20, BEP20, Solana, TON
+- P2P trading directly with real players (no bots in the middle)
+- ~36,000 skins listed, prices powered by Buff163
+- Zero trading fees / zero commission
+- Trades happen through Steam's official trading system (safe)
+DO NOT invent features. DO NOT use generic SEO-spam phrases ("welcome to the world of...", "in today's market...").
+`;
 
 function truncate(s: string, max: number): string {
   s = s.trim().replace(/\s+/g, " ");
@@ -27,6 +27,7 @@ function truncate(s: string, max: number): string {
 }
 
 function unquote(s: string): string {
+  // Remove common LLM artifacts: surrounding quotes, leading "Title:", code fences.
   return s
     .replace(/^```[a-z]*\n?/i, "")
     .replace(/\n?```\s*$/i, "")
@@ -42,17 +43,15 @@ function unquote(s: string): string {
 export async function genSnippet(opp: OpportunityRow): Promise<{ field: string; value: string; llm: LlmResult }> {
   const isRu = opp.locale === "ru";
   const target = opp.field === "title" ? "title" : "description";
-  const sys = `${brandBlurb()}
-
-${FORBIDDEN_PHRASES_NOTE}
-
-Task: rewrite the meta ${target} for a page so users actually click.
+  const sys = `${BRAND_FACTS}
+Task: rewrite the meta ${target} for a CSBoard page so users actually click.
 Hard rules:
 - ${target === "title" ? "50-60 characters total" : "140-160 characters total"}
-- Naturally include the search query the page already ranks for.
+- Naturally include the search query the page already ranks for
 - ${isRu ? "Output in Russian (Cyrillic), match Russian search intent." : "Output in English."}
 - One line. NO quotes, NO labels, just the ${target} text itself.
-- Speak directly. State outcomes the user gets, not vague positioning.`;
+- End title with " — CSBoard" if length permits.
+- Speak directly: "Sell skins for USDT in seconds" not "Welcome to our marketplace".`;
 
   const user = `Search query the page ranks for: ${opp.query}
 Page path: ${opp.path}
@@ -78,17 +77,14 @@ Why we're rewriting: ${opp.notes}`;
 
 export async function genIntroExtra(opp: OpportunityRow): Promise<{ field: string; value: string; llm: LlmResult }> {
   const isRu = opp.locale === "ru";
-  const sys = `${brandBlurb()}
-
-${FORBIDDEN_PHRASES_NOTE}
-
-Task: write 2-3 paragraphs (200-400 words total) that genuinely answer the search query.
+  const sys = `${BRAND_FACTS}
+Task: write ONE tight paragraph (90-140 words, ≤900 chars) that genuinely answers the search query.
 Goals:
 - The query phrase MUST appear in the first sentence, in natural sentence flow.
-- Include 2-4 specific concrete facts (numbers, named entities, comparisons).
-- Tie at least one paragraph to a fact stated in the brand blurb (only if it provides genuine value).
-- ${isRu ? "Russian, professional but conversational." : "English, professional but conversational."}
-- Specific concrete details > generic statements.
+- Include 2-4 specific facts: prices, float values, market behavior, real CS2 mechanics, comparisons.
+- Tie at least one paragraph to a CSBoard hard fact (instant USDT, P2P, zero fees, ~36k skins).
+- ${isRu ? "Russian, professional but conversational. Use real CS2 slang where natural (BS/MW/FT/FN/StatTrak™/scoped trade)." : "English, professional but conversational. Use real CS2 slang where natural (BS/MW/FT/FN, StatTrak™)."}
+- Specific concrete details > generic statements. NO SEO clichés ("in today's market", "discover the world of", "elevate your game").
 - Plain text only. No markdown headings, no bullet lists, no quotes around the output, no labels.`;
 
   const user = `Page path: ${opp.path}
@@ -101,8 +97,10 @@ Why we're writing this: ${opp.notes}`;
     tier: 2,
     systemPrompt: sys,
     userPrompt: user,
-    maxTokens: 800,
-    temperature: 0.65,
+    // Cap output at ~150 words / 900 chars (was 800 tokens). The previous wide
+    // ceiling was producing 400-word walls of text appended to every item page.
+    maxTokens: 280,
+    temperature: 0.6,
     reason: `rank_push ${opp.locale} ${opp.path} (${opp.query})`,
   });
   const value = unquote(llm.text);
@@ -121,15 +119,12 @@ export interface FaqDelta {
 
 export async function genFaqItem(opp: OpportunityRow): Promise<{ field: string; value: FaqDelta; llm: LlmResult }> {
   const isRu = opp.locale === "ru";
-  const sys = `${brandBlurb()}
-
-${FORBIDDEN_PHRASES_NOTE}
-
-Task: write ONE FAQ Q&A pair that helps users searching for "${opp.query}" reach the right answer.
+  const sys = `${BRAND_FACTS}
+Task: write ONE FAQ Q&A pair that helps users searching for "${opp.query}" reach the right answer on CSBoard.
 Format strictly as JSON: {"q":"...", "a":"..."}.
 Constraints:
 - q: a real question a user would ask (50-100 chars). Use the query phrase naturally if it reads well.
-- a: 2-4 sentences (180-340 chars). Concrete, useful. Reference brand-blurb features only if they actually help.
+- a: 2-4 sentences (180-340 chars). Concrete, useful. Reference CSBoard features if applicable.
 - ${isRu ? "Russian." : "English."}
 - No greetings, no "Sure!", no markdown.`;
 
@@ -149,6 +144,7 @@ Current SERP position: ${(opp.metrics as any)?.position?.toFixed?.(1) ?? "?"}`;
   const cleaned = unquote(llm.text);
   let parsed: FaqDelta;
   try {
+    // Extract first {...} blob in case the LLM wrapped it.
     const m = cleaned.match(/\{[\s\S]*\}/);
     parsed = JSON.parse(m ? m[0] : cleaned) as FaqDelta;
   } catch {
@@ -165,5 +161,5 @@ Current SERP position: ${(opp.metrics as any)?.position?.toFixed?.(1) ?? "?"}`;
 // ---------------------------------------------------------------------------
 
 export async function genRegressionFix(opp: OpportunityRow) {
-  return genSnippet(opp);
+  return genSnippet(opp); // shape is identical for now
 }

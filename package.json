@@ -1,8 +1,8 @@
 {
-  "name": "autonomous-seo-bot",
+  "name": "csboard-seo-bot",
   "version": "0.1.0",
-  "description": "Autonomous SEO content bot — pulls GSC + GA4, classifies opportunities, generates rewrites via OpenRouter LLM tiers, applies low-risk changes through an audited SQLite CMS exposed over HTTP (read) + MCP (write).",
-  "license": "MIT",
+  "description": "Autonomous SEO content service for csboard.com / csboard.trade — isolated SQLite-backed CMS with read-only HTTP API + MCP write interface",
+  "private": true,
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -13,11 +13,10 @@
     "start": "node dist/src/index.js",
     "dev": "tsx watch src/index.ts",
     "migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx scripts/seed-from-json.ts",
+    "seed": "tsx scripts/seed-from-i18n.ts",
     "mcp": "tsx src/mcp/server.ts",
     "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
-    "run-now": "tsx scripts/run-now.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google-analytics/data": "^5.2.1",

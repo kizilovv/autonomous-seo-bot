@@ -1,12 +1,12 @@
 -- 003 — full-blog generation system.
 -- Bot picks high-impression page-3+ query clusters with no dedicated page,
--- writes a 1200-1800 word post, stores it here.
--- Frontend reads via GET /v1/blog/post?locale=&slug=
+-- writes a 1200-1500 word post, stores it here.
+-- Frontend reads via GET /v1/blog/:slug; falls back to bundled / csboard backend.
 
 CREATE TABLE IF NOT EXISTS generated_blogs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  slug          TEXT NOT NULL,
-  locale        TEXT NOT NULL,
+  slug          TEXT NOT NULL,                       -- e.g. "cs2-knife-trading-2026"
+  locale        TEXT NOT NULL,                       -- 'en' | 'ru'
   title         TEXT NOT NULL,
   meta_title    TEXT,
   meta_description TEXT,

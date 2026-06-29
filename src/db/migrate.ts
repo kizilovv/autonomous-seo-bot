@@ -6,17 +6,19 @@ import { logger } from "../logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
+// migrations live at PROJECT_ROOT/migrations. We try several candidates so the
+// resolver works whether running from `tsx src/...` (cwd=project) or compiled
+// `node dist/src/...` (cwd=project, __dirname inside dist).
 function resolveMigrationsDir(): string {
   const candidates = [
-    path.resolve(process.cwd(), "migrations"),
-    path.resolve(__dirname, "../../../migrations"),
-    path.resolve(__dirname, "../../migrations"),
+    path.resolve(process.cwd(), "migrations"),         // pm2 cwd
+    path.resolve(__dirname, "../../../migrations"),    // dist/src/db -> project root
+    path.resolve(__dirname, "../../migrations"),       // src/db -> project root (tsx run)
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
-  return candidates[0];
+  return candidates[0]; // best guess; downstream warn handles missing dir
 }
 const MIGRATIONS_DIR = resolveMigrationsDir();
 
@@ -63,6 +65,7 @@ export function runMigrations(): void {
   }
 }
 
+// CLI entrypoint
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     runMigrations();

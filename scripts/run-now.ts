@@ -14,6 +14,7 @@ import { runApply } from "../src/workers/apply.js";
 import { runVerify } from "../src/workers/verify.js";
 import { runDailyReport } from "../src/workers/daily-report.js";
 import { runBlogGenerator } from "../src/workers/blog-generator.js";
+import { runDataForSeoPull } from "../src/workers/dataforseo_pull.js";
 import { closeDb } from "../src/db/connection.js";
 import { runMigrations } from "../src/db/migrate.js";
 
@@ -28,6 +29,16 @@ async function main() {
     case "verify":       console.log(await runVerify()); break;
     case "daily-report": console.log(await runDailyReport()); break;
     case "blog":         console.log(await runBlogGenerator()); break;
+    case "ctr-feedback": {
+      const m = await import("../src/workers/ctr-feedback.js");
+      console.log(await m.runCtrFeedback());
+      break;
+    }
+    case "dataforseo-pull": {
+      const competitor = (process.argv[3] || "").trim() || undefined;
+      console.log(await runDataForSeoPull({ competitor }));
+      break;
+    }
     case "full":
       console.log("== pull ==");        console.log(await runPull());
       console.log("== analyze ==");     console.log(await runAnalyze());
@@ -37,7 +48,7 @@ async function main() {
       console.log("== daily-report =="); console.log(await runDailyReport());
       break;
     default:
-      console.error("usage: tsx scripts/run-now.ts <pull|analyze|generate|apply|verify|daily-report|full>");
+      console.error("usage: tsx scripts/run-now.ts <pull|analyze|generate|apply|verify|daily-report|dataforseo-pull [competitor]|full>");
       process.exit(2);
   }
   closeDb();

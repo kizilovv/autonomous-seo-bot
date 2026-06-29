@@ -26,6 +26,7 @@ export function closeDb(): void {
   }
 }
 
+// Helper: run a closure inside a transaction.
 export function tx<T>(fn: (db: Database.Database) => T): T {
   const d = getDb();
   const wrapped = d.transaction(fn);

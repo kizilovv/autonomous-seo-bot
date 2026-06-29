@@ -1,20 +1,20 @@
--- autonomous-seo-bot — initial schema
+-- csboard-seo-bot — initial schema
 -- All SEO content lives here. Frontend reads via HTTP API. Bot/agents write via MCP.
 -- Note: PRAGMAs are set on the connection (src/db/connection.ts), not here —
 -- some PRAGMAs (synchronous, journal_mode) can't run inside a transaction.
 
 -- ---------------------------------------------------------------------------
--- content: the live SEO state served to the frontend.
--- (locale, path, field) is unique. value is JSON-encoded TEXT.
+-- content: the live SEO state served to the frontend
+-- (locale, path, field) is unique. value is JSONB-ish (TEXT containing JSON).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS content (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  locale      TEXT NOT NULL,                 -- 'en' | 'ru' | etc.
-  path        TEXT NOT NULL,                 -- route path, e.g. '/pricing' or '/items/foo'
-  field       TEXT NOT NULL,                 -- 'title' | 'description' | 'h1' | 'intro' | 'faq' | 'keywords' | 'intro_extra'
+  locale      TEXT NOT NULL,                 -- 'en' | 'ru'
+  path        TEXT NOT NULL,                 -- '/sell' | '/trades' | '/items/ak-47-redline'
+  field       TEXT NOT NULL,                 -- 'title' | 'description' | 'h1' | 'intro' | 'faq' | 'keywords'
   value       TEXT NOT NULL,                 -- JSON string (string or array)
   source      TEXT NOT NULL DEFAULT 'seed',  -- 'seed' | 'manual' | 'bot' | 'agent:<name>'
-  reason      TEXT,                          -- why this change (LLM tier, GSC striking-distance, etc.)
+  reason      TEXT,                          -- why this change (LLM tier-1, GSC striking-distance, etc.)
   variant_id  TEXT NOT NULL DEFAULT '',     -- '' = canonical, otherwise variant key (A/B)
   weight      INTEGER DEFAULT 100,           -- 0-100 distribution weight when variants exist
   active      INTEGER NOT NULL DEFAULT 1,    -- soft delete
@@ -69,8 +69,8 @@ BEGIN
 END;
 
 -- ---------------------------------------------------------------------------
--- sitemap_extras: bot-managed priority/changefreq/lastmod overrides
--- A Next.js sitemap.ts can fetch these and merge with auto-generated routes.
+-- sitemap_extras: SEO-bot-managed priority/changefreq/lastmod overrides
+-- The Next.js sitemap.ts can fetch these and merge with auto-generated routes.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sitemap_extras (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS sitemap_extras (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS gsc_snapshots (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  site          TEXT NOT NULL,                -- e.g. 'sc-domain:example.com'
+  site          TEXT NOT NULL,                -- 'sc-domain:csboard.com'
   snapshot_date TEXT NOT NULL,                -- YYYY-MM-DD
   query         TEXT NOT NULL,
   page          TEXT,
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS llm_spend (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  worker      TEXT NOT NULL,                   -- 'pull' | 'analyze' | 'generate' | 'apply' | 'verify' | 'daily-report' | 'blog-generator'
+  worker      TEXT NOT NULL,                   -- 'gsc-pull' | 'ga4-pull' | 'analyze' | 'generate' | 'verify'
   started_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   finished_at TEXT,
   status      TEXT NOT NULL DEFAULT 'running', -- 'running' | 'success' | 'failed'

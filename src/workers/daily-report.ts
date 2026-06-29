@@ -2,9 +2,10 @@
 // applied today (with diffs), pending stuck items, spend.
 import { gscSites, config } from "../config.js";
 import { aggregateQueries, listOpportunitiesByStatus, getSpend } from "../db/repo.js";
-import { sendMessage, esc } from "../notify/telegram.js";
+import { sendMessage, esc, bullets } from "../notify/telegram.js";
 import { startRun, finishRun, failRun } from "../db/repo.js";
 import { getDb } from "../db/connection.js";
+import { logger } from "../logger.js";
 
 function offsetDate(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 86400_000).toISOString().slice(0, 10);
@@ -39,7 +40,7 @@ export async function runDailyReport() {
   const id = startRun("daily-report");
   try {
     const lines: string[] = [];
-    lines.push(`<b>📊 ${config.SERVICE_NAME} daily report</b>`);
+    lines.push(`<b>📊 csboard-seo-bot daily report</b>`);
     lines.push(`<i>${esc(new Date().toUTCString())}</i>\n`);
 
     // ---- per-site rollup ----
@@ -66,7 +67,7 @@ export async function runDailyReport() {
     }
     lines.push("");
 
-    // ---- applied in last 24h ----
+    // ---- applied in last 24h (full diff sample) ----
     const db = getDb();
     const cutoff24h = new Date(Date.now() - 24 * 3600_000).toISOString();
     const appliedToday = db
@@ -83,6 +84,7 @@ export async function runDailyReport() {
         return acc;
       }, {});
       lines.push(`<b>✅ Auto-applied last 24h</b>: ${appliedToday.length} (${Object.entries(byKind).map(([k,v])=>`${k} ${v}`).join(", ")})`);
+      // Show up to 5 with a 200-char proposed snippet
       for (const o of appliedToday.slice(0, 5)) {
         let preview = "";
         try {
@@ -99,7 +101,7 @@ export async function runDailyReport() {
       lines.push("");
     }
 
-    // ---- pending review ----
+    // ---- pending (review-needed only — body content the bot couldn't auto-apply) ----
     const pending = listOpportunitiesByStatus("pending", 50);
     if (pending.length) {
       const byKind = pending.reduce<Record<string, number>>((acc, o) => {
@@ -107,6 +109,7 @@ export async function runDailyReport() {
         return acc;
       }, {});
       lines.push(`<b>👁 Pending review</b>: ${pending.length} (${Object.entries(byKind).map(([k,v])=>`${k} ${v}`).join(", ")})`);
+      // Top 3 with most impact
       const top = pending
         .map((o: any) => ({ ...o, m: JSON.parse(o.metrics ?? "{}") }))
         .sort((a, b) => (b.m.impressions ?? 0) - (a.m.impressions ?? 0))
@@ -116,13 +119,39 @@ export async function runDailyReport() {
           `  · <code>${esc(o.locale)}${esc(o.path)}</code> — "${esc(o.query ?? "")}" pos ${(o.m.position ?? 0).toFixed(1)}, ${o.m.impressions ?? 0} imps`
         );
       }
-      lines.push(`<i>To review pending opportunities, query the local SQLite DB.</i>`);
+      lines.push(`<i>To review pending opportunities:</i> <code>sqlite3 /srv/csboard-seo/data/seo.db 'SELECT id,kind,path,query,substr(proposed_value,1,200) FROM opportunities WHERE status=\"pending\" LIMIT 20;'</code>`);
       lines.push("");
+    }
+
+    // ---- competitor-gap discovery (DataForSEO, last 24h) ----
+    try {
+      const lastDfsRun = db.prepare(
+        `SELECT target, status, cost_usd, kw_returned, gap_emitted, started_at
+           FROM dataforseo_runs
+          WHERE started_at >= ? AND endpoint='ranked_keywords'
+          ORDER BY started_at DESC LIMIT 1`
+      ).get(new Date(Date.now() - 24 * 3600_000).toISOString()) as any | undefined;
+      if (lastDfsRun) {
+        const newGapTotal = db.prepare(
+          `SELECT count(*) c FROM competitor_gap_keywords WHERE first_seen_at >= ?`
+        ).get(new Date(Date.now() - 24 * 3600_000).toISOString()) as { c: number };
+        lines.push(`<b>🔎 DataForSEO gap discovery</b>: ${lastDfsRun.target} → ${lastDfsRun.gap_emitted} new opps (${newGapTotal.c} new kw cached, ${lastDfsRun.kw_returned} competitor kw scanned, $${(lastDfsRun.cost_usd||0).toFixed(4)}, status=${lastDfsRun.status})`);
+        lines.push("");
+      }
+    } catch (e) {
+      logger.warn({ err: (e as Error).message }, "daily-report: dfs section failed");
     }
 
     // ---- spend ----
     const spend = getSpend();
     lines.push(`<b>💰 LLM spend</b>: today $${spend.daily.toFixed(3)} / cap $${config.OPENROUTER_DAILY_BUDGET_USD.toFixed(2)} · MTD $${spend.monthly.toFixed(3)} / cap $${config.OPENROUTER_MONTHLY_BUDGET_USD.toFixed(2)}`);
+    try {
+      const dfs = await import("../dataforseo/client.js");
+      const dfsSpend = dfs.getDataForSeoSpend();
+      lines.push(`<b>💰 DataForSEO spend</b>: today $${dfsSpend.daily.toFixed(4)} (${dfsSpend.calls_today} calls) / cap $${config.DATAFORSEO_DAILY_BUDGET_USD.toFixed(2)} · MTD $${dfsSpend.monthly.toFixed(4)} (${dfsSpend.calls_month} calls) / cap $${config.DATAFORSEO_MONTHLY_BUDGET_USD.toFixed(2)}`);
+    } catch (e) {
+      logger.warn({ err: (e as Error).message }, "daily-report: dfs spend lookup failed");
+    }
 
     const summary = lines.join("\n");
     await sendMessage(summary);

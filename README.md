@@ -1,232 +1,127 @@
-# autonomous-seo-bot
+# csboard-seo-bot
 
-An autonomous SEO content service. Pulls Google Search Console + GA4, classifies
-ranking opportunities, generates rewrites via OpenRouter LLM tiers, and applies
-low-risk changes to a SQLite-backed CMS that's exposed over HTTP (read-only) and
-MCP (write).
+Autonomous SEO content service for csboard.com / csboard.trade.
 
-Built to run unattended on a single VPS with a daily cron pipeline.
-
-## Why
-
-Most SEO automation tools are dashboards that point at problems and ask a human
-to fix them. This bot writes the fix, runs a risk gate against it, applies
-low-risk changes itself, and routes anything visible-on-page to a Telegram
-review queue. Spend is hard-capped per day and per month so it can't run away.
+**Isolated by design.** Bot owns its own SQLite DB. CSBoard frontend reads via a
+read-only HTTP API. Bot has zero write access to the CSBoard production database.
 
 ## Architecture
 
 ```
-                     ┌───────────────────────┐
-   GSC + GA4 (cron)  │  workers/pull         │  →  gsc_snapshots, ga4_snapshots
-                     ├───────────────────────┤
-                     │  workers/analyze      │  →  opportunities (5 kinds)
-                     ├───────────────────────┤
-                     │  workers/generate     │  →  proposals (OpenRouter, tier-routed, cached, budgeted)
-                     ├───────────────────────┤
-                     │  workers/apply        │  →  risk gate decides: auto / review / block
-                     ├───────────────────────┤
-                     │  workers/verify       │  →  fetch live page, confirm needle rendered
-                     ├───────────────────────┤
-                     │  workers/blog-gen     │  →  full 1200-1800 word blog posts for orphan clusters
-                     ├───────────────────────┤
-                     │  workers/daily-report │  →  Telegram digest: trends, applied, pending, spend
-                     └───────────────────────┘
-                              │      ▲
-                              ▼      │
-                       ┌────────────────────┐
-                       │  SQLite (seo.db)   │   single file, WAL, audit-triggered history
-                       └────────────────────┘
-                          │              │
-                  read    │              │   write
-                  (HTTP)  ▼              ▼   (MCP, stdio)
-                  ┌─────────────┐  ┌────────────────────┐
-                  │ Fastify API │  │ MCP server (tools) │
-                  │  :9100      │  │  seo.update_content│
-                  └─────────────┘  │  seo.rollback ...  │
-                  loopback only    └────────────────────┘
-                  (frontend SSR)   (Claude Code, Cursor)
+SQLite (seo.db, single file)
+  ↑ writes (bot/agents only via MCP)
+  ↑ reads (frontend via HTTP /v1/content)
+
+Workers (cron, Phase 1+):
+  GSC pull → snapshots
+  GA4 pull → snapshots
+  Analyzer → opportunities
+  Generator (OpenRouter) → proposals
+  Applier → writes via MCP into content
+  Verifier → Lighthouse + GSC URL Inspect
 ```
 
-If the bot is offline, your frontend should transparently fall back to bundled
-i18n strings — the bot's job is to *enrich* SEO, not to serve it.
+If the bot is offline, the frontend transparently falls back to bundled
+`messages/{en,ru}.json` — site never breaks.
 
-## Opportunity kinds
+## Endpoints
 
-| Kind | Trigger | Field | Risk | Auto |
-|---|---|---|---|---|
-| `snippet_rewrite` | top-10 ranking, CTR < 80% expected, ≥30 imps | `description` | low | ✅ |
-| `ctr_regression` | same SERP pos vs prior 28d, clicks dropped >30% | `description` | low | ✅ |
-| `rank_push` | pos 4-10, ≥10 imps, query NOT in H1/intro | `intro_extra` | low | ✅ (append) |
-| `content_enrich` | pos 11-20, ≥10 imps | `faq` | medium | ✅ (append+dedup) |
-| `lost_ranking` | was ≤10, now > 30 | n/a | high | ⛔ blocked |
-| `schema_gap` | (reserved) | varies | medium | ⛔ |
-
-The risk gate (`src/apply/risk-gate.ts`) is the single source of truth for what
-the bot is allowed to do without a human. Tighten it (set `AUTO_APPLY_LOW_RISK=false`)
-to put everything on review.
-
-## OpenRouter tier routing
-
-Three tiers, each a fallback chain. First model that responds wins. Spend is
-estimated per-call from token counts and recorded in `llm_spend` /
-`llm_spend_monthly`. When daily or monthly cap is hit, the generator stops mid-
-batch and queued opportunities just wait for tomorrow.
-
-| Tier | Default chain | Used for |
+| Endpoint | Type | What |
 |---|---|---|
-| 1 | `deepseek/deepseek-chat` → `anthropic/claude-haiku-4.5` → `openai/gpt-4o-mini` | snippet rewrites, FAQ items |
-| 2 | `anthropic/claude-sonnet-4.5` → `claude-sonnet-4` → `deepseek/deepseek-chat` | rank-push body paragraphs |
-| 3 | `anthropic/claude-sonnet-4.5` → `claude-sonnet-4` → `deepseek/deepseek-chat` | full blog posts |
+| `GET /healthz` | HTTP | liveness |
+| `GET /v1/content?locale=&path=` | HTTP | resolved fields for a page |
+| `GET /v1/sitemap-extras?locale=` | HTTP | optional priority/changefreq overrides |
+| `GET /v1/pages` | HTTP | list of (locale, path) tuples that have content |
+| `seo.list_pages` | MCP | same as above |
+| `seo.get_content` | MCP | fetch fields for a (locale, path) |
+| `seo.update_content` | MCP | upsert one field with audit trail |
+| `seo.delete_content` | MCP | soft-delete (active=0) |
+| `seo.rollback` | MCP | restore from history entry |
+| `seo.history` | MCP | full change log for a page |
+| `seo.set_sitemap_priority` | MCP | tweak sitemap metadata |
 
-Edit `src/llm/openrouter.ts` to swap the model lists.
+## Local dev
 
-## MCP write surface
+```bash
+npm install
+npm run migrate
+npm run seed                     # pulls from ../cs2-tradeboard-frontend-dev/messages
+npm run dev                      # tsx watch on port 9100
+curl http://127.0.0.1:9100/healthz
+curl 'http://127.0.0.1:9100/v1/content?locale=en&path=/sell'
+```
 
-The bot's only write API is MCP. Run the stdio server and connect any MCP client:
+MCP server (stdio) for ad-hoc agent use:
 
 ```bash
 npm run mcp
-# or built:
-node dist/src/mcp/server.js
 ```
 
-Tools:
+In Claude Code: `claude mcp add csboard-seo -- node /Users/.../csboard-seo-bot/dist/src/mcp/server.js`
 
-- `seo.list_pages` — list every (locale, path) tuple with at least one field.
-- `seo.get_content` — fetch all fields for a page.
-- `seo.update_content` — upsert one field. Audited.
-- `seo.delete_content` — soft-delete (active=0).
-- `seo.rollback` — restore from a `content_history` row.
-- `seo.history` — list change log for a page.
-- `seo.set_sitemap_priority` — set sitemap.xml priority/changefreq overrides.
+## Production deploy (Koara, 95.217.106.61)
 
-Every write goes through `content_history` via SQLite triggers, so rollback is
-always one MCP call.
+1. Bring code up to date:
+   ```bash
+   ssh root@95.217.106.61 "mkdir -p /srv/csboard-seo /var/log/csboard-seo /srv/csboard-seo/data /srv/csboard-seo/.secrets"
+   rsync -av --delete \
+     --exclude node_modules --exclude data --exclude dist --exclude .git \
+     ./ root@95.217.106.61:/srv/csboard-seo/
+   ```
 
-## HTTP read surface
+2. Install + build on server:
+   ```bash
+   ssh root@95.217.106.61 "cd /srv/csboard-seo && npm ci && npm run build"
+   ```
 
-| Endpoint | What |
-|---|---|
-| `GET /healthz` | liveness |
-| `GET /v1/content?locale=&path=` | resolved fields for a page |
-| `GET /v1/sitemap-extras?locale=` | optional priority/changefreq overrides |
-| `GET /v1/pages` | list of (locale, path) tuples that have content |
-| `GET /v1/blog?locale=&limit=` | published blog posts |
-| `GET /v1/blog/post?locale=&slug=` | one blog post (full body + faq) |
-| `GET /v1/blog/sitemap` | all published slugs (for sitemap generators) |
+3. Service account (already on Jarvis VPS — copy to Koara):
+   ```bash
+   scp root@108.165.173.252:/home/jarvis/jarvis-bot/config/google-service-account.json \
+       root@95.217.106.61:/srv/csboard-seo/.secrets/google-service-account.json
+   ssh root@95.217.106.61 "chmod 600 /srv/csboard-seo/.secrets/google-service-account.json"
+   ```
 
-By default the server binds to `127.0.0.1:9100` — frontend instances on the
-same host hit it via loopback. Don't expose it publicly; there's no auth.
+4. `.env` on server (adapt from `.env.example`).
 
-## Quick start
+5. Migrate + seed once:
+   ```bash
+   ssh root@95.217.106.61 "cd /srv/csboard-seo && npm run migrate && npm run seed -- /srv/csboard.trade/cs2-tradeboard-frontend-dev"
+   ```
+   (point seed at whichever frontend worktree has the most up-to-date messages)
 
-```bash
-git clone https://github.com/<you>/autonomous-seo-bot.git
-cd autonomous-seo-bot
-npm install
-cp .env.example .env
-# fill in OPENROUTER_API_KEY, GA4_PROPERTY_ID, GSC_SITES, BRAND_BLURB
-npm run migrate
-npm run seed -- ./seed.example.json
-npm run dev
-```
+6. pm2:
+   ```bash
+   ssh root@95.217.106.61 "cd /srv/csboard-seo && pm2 start ecosystem.config.cjs && pm2 save"
+   ```
 
-Now hit it:
+7. Verify:
+   ```bash
+   ssh root@95.217.106.61 "curl -s http://127.0.0.1:9100/healthz && echo && curl -s 'http://127.0.0.1:9100/v1/content?locale=en&path=/sell' | head -c 400"
+   ```
 
-```bash
-curl http://127.0.0.1:9100/healthz
-curl 'http://127.0.0.1:9100/v1/content?locale=en&path=/'
-```
+## Frontend wiring (csboard)
 
-## Production deploy
+`cs2-tradeboard-frontend-dev/lib/seo-cms.ts` reads `process.env.SEO_CMS_URL`
+(default `http://127.0.0.1:9100`). On Koara dev/prod the bot listens on the
+loopback interface — frontend pods on the same host hit it locally.
 
-The bot is one Node process. PM2 example in [`ecosystem.config.cjs`](ecosystem.config.cjs).
+If the dev server is on a different host, set `SEO_CMS_URL` in the frontend's
+`.env.production` to a private network address (or front the bot behind nginx
+with an internal-only `allow` rule).
 
-```bash
-npm run build
-pm2 start ecosystem.config.cjs
-pm2 save
-```
+## Safety guarantees
 
-You'll need:
+- HTTP API has **zero** write surface. Frontend cannot mutate state via this service.
+- All writes go through MCP — every call is logged + audited via DB triggers.
+- `content_history` table preserves every previous value; rollback is one MCP call.
+- Bot has **no** access to `csboard-postgres-prod`, no GitHub PAT, no deploy keys.
+- If bot dies → frontend falls back to bundled i18n (5-min cache + 800ms timeout).
 
-- A Google service account JSON file with **Search Console** + **GA4 Data API**
-  read access. Add the SA email to your GSC property and your GA4 property as a
-  viewer. Path goes in `GOOGLE_APPLICATION_CREDENTIALS`.
-- An OpenRouter API key with a credit balance (start with $1-5; the bot's daily
-  cap defaults to $1).
-- (Optional) A Telegram bot token + chat ID for daily digests.
+## Roadmap
 
-## Frontend wiring (Next.js example)
-
-```ts
-// app/lib/seo-cms.ts — fetch with timeout + Next.js cache + bundled fallback
-const SEO_CMS_URL = process.env.SEO_CMS_URL ?? "http://127.0.0.1:9100";
-
-export async function getSeoContent(locale: string, path: string) {
-  try {
-    const res = await fetch(
-      `${SEO_CMS_URL}/v1/content?locale=${locale}&path=${encodeURIComponent(path)}`,
-      { signal: AbortSignal.timeout(800), next: { revalidate: 300 } }
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as { fields: Record<string, unknown> };
-  } catch {
-    return null; // fall back to bundled messages/{locale}.json
-  }
-}
-```
-
-That's it. `generateMetadata` calls `getSeoContent`, falls back to your bundled
-i18n strings if the bot is unreachable, and your site never breaks.
-
-## Configuration
-
-All runtime config is in `.env`. See [`.env.example`](.env.example) for every
-variable. The hot-tunable ones (no code change required, just `pm2 restart`):
-
-| Env | Default | What |
-|---|---|---|
-| `AUTO_APPLY_LOW_RISK` | `true` | flip to `false` for observation mode (everything goes to review) |
-| `MAX_AUTO_CHANGES_PER_DAY` | `20` | hard cap on auto-applies per UTC day |
-| `OPENROUTER_DAILY_BUDGET_USD` | `1.00` | generator stops mid-batch when reached |
-| `OPENROUTER_MONTHLY_BUDGET_USD` | `30.00` | same, monthly |
-| `BRAND_BLURB` | `""` | system context for every LLM prompt — your hard facts |
-| `BRAND_TERMS_REGEX` | `""` | navigational queries to skip in the classifier |
-| `GSC_SITES` | `""` | comma-separated `sc-domain:` properties |
-| `SITE_URLS` | `""` | `locale=url` map used by the verify worker |
-
-## Manual ops
-
-```bash
-# trigger a single worker (rebuild dist first if you changed code)
-node dist/scripts/run-now.js pull
-node dist/scripts/run-now.js analyze
-node dist/scripts/run-now.js generate
-node dist/scripts/run-now.js apply
-node dist/scripts/run-now.js verify
-node dist/scripts/run-now.js daily-report
-node dist/scripts/run-now.js blog
-node dist/scripts/run-now.js full   # pull → analyze → generate → apply → blog → report
-
-# inspect a pending opportunity
-sqlite3 ./data/seo.db 'SELECT id, kind, locale, path, query, substr(proposed_value,1,200) FROM opportunities ORDER BY id DESC LIMIT 20;'
-```
-
-## Roadmap / phases
-
-- ✅ Phase 0 — read-only API + MCP write surface + frontend wiring
-- ✅ Phase 1 — daily GSC + GA4 pulls into snapshots + Telegram report
-- ✅ Phase 2 — opportunity classifier + OpenRouter generator with budget cap
-- ✅ Phase 3 — auto-apply for low-risk, Telegram review for medium-risk
-- ✅ Phase 4 — verify pipeline (live HTML containment + sparing GSC URL Inspect)
-- ✅ Phase 5 — full blog post generator for orphan clusters
-- ⬜ Phase 6 (opt) — admin UI for manual review / browse history
-
-See [`docs/PIPELINE.md`](docs/PIPELINE.md) for the cron schedule + risk-gate
-flow + failure modes in detail.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+- Phase 0 (now) — read-only API + MCP write surface + frontend wiring ✅
+- Phase 1 — daily GSC + GA4 pulls into snapshots, Telegram report (no writes yet)
+- Phase 2 — opportunity classifier + OpenRouter dry-run (Telegram review)
+- Phase 3 — auto-apply for low-risk fixes (i18n-only) with risk gate
+- Phase 4 — verify pipeline (Lighthouse, GSC URL Inspect)
+- Phase 5 — optional admin UI for manual review

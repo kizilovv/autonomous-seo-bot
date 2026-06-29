@@ -11,5 +11,5 @@ export const logger = pino({
         },
       }
     : {}),
-  base: { service: config.SERVICE_NAME },
+  base: { service: "csboard-seo-bot" },
 });

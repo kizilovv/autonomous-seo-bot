@@ -295,7 +295,8 @@ export type OpportunityKind =
   | "content_enrich"
   | "ctr_regression"
   | "lost_ranking"
-  | "schema_gap";
+  | "schema_gap"
+  | "competitor_gap";        // DataForSEO-discovered keywords competitors rank for, csboard doesn't
 
 export interface OpportunityRow {
   id?: number;
@@ -362,9 +363,60 @@ export function setProposal(id: number, proposed_value: string, riskOverride?: "
 
 export function applyOpportunity(id: number, contentId: number): void {
   const db = getDb();
+  // Read metrics FIRST (before status flip) so we capture the baseline
+  // regardless of any post-update side effects.
+  const opp = db.prepare("SELECT metrics FROM opportunities WHERE id = ?").get(id) as { metrics: string | null } | undefined;
+  let baselineCtr: number | null = null;
+  let baselinePos: number | null = null;
+  let baselineImps: number | null = null;
+  if (opp?.metrics) {
+    try {
+      const m = JSON.parse(opp.metrics) as { impressions?: number; ctr?: number; position?: number };
+      baselineCtr = m.ctr ?? null;
+      baselinePos = m.position ?? null;
+      baselineImps = m.impressions ?? null;
+    } catch {/* ignore */}
+  }
+  // Single UPDATE — applied_at + content id + baseline metrics in one shot.
   db.prepare(
-    `UPDATE opportunities SET status = 'applied', applied_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), applied_content_id = ? WHERE id = ?`
-  ).run(contentId, id);
+    `UPDATE opportunities
+     SET status = 'applied',
+         applied_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+         applied_content_id = ?,
+         baseline_ctr = COALESCE(baseline_ctr, ?),
+         baseline_position = COALESCE(baseline_position, ?),
+         baseline_impressions = COALESCE(baseline_impressions, ?)
+     WHERE id = ?`
+  ).run(contentId, baselineCtr, baselinePos, baselineImps, id);
+}
+
+/**
+ * Backfill baseline_ctr / baseline_position / baseline_impressions for
+ * historical applied opportunities by parsing the metrics JSON they already
+ * stored at detection time. Idempotent — only fills NULL columns.
+ */
+export function backfillBaselines(): { backfilled: number; skipped: number } {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, metrics FROM opportunities WHERE status='applied' AND baseline_ctr IS NULL AND metrics IS NOT NULL`
+    )
+    .all() as Array<{ id: number; metrics: string }>;
+  let backfilled = 0, skipped = 0;
+  const upd = db.prepare(
+    "UPDATE opportunities SET baseline_ctr=?, baseline_position=?, baseline_impressions=? WHERE id=?"
+  );
+  for (const r of rows) {
+    try {
+      const m = JSON.parse(r.metrics) as { impressions?: number; ctr?: number; position?: number };
+      if (m.ctr == null && m.position == null && m.impressions == null) { skipped++; continue; }
+      upd.run(m.ctr ?? null, m.position ?? null, m.impressions ?? null, r.id);
+      backfilled++;
+    } catch {
+      skipped++;
+    }
+  }
+  return { backfilled, skipped };
 }
 
 export function rejectOpportunity(id: number, reason: string): void {
@@ -453,6 +505,32 @@ export function aggregateQueries(site: string, sinceDate: string, untilDate: str
        ORDER BY impressions DESC`
     )
     .all(site, sinceDate, untilDate) as QueryAggregate[];
+}
+
+export interface TopQuery { query: string; impressions: number; clicks: number; ctr: number; position: number; }
+
+/**
+ * Top search-demand queries across ALL configured GSC sites in a window —
+ * grouped by query (not query+page). Powers the cross-engine signal bus: the
+ * email-marketing agent reads this to ride real CS2 search demand in its subjects.
+ */
+export function topQueries(sinceDate: string, untilDate: string, limit = 15): TopQuery[] {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT query,
+              SUM(impressions) AS impressions,
+              SUM(clicks) AS clicks,
+              CASE WHEN SUM(impressions) > 0 THEN CAST(SUM(clicks) AS REAL)/SUM(impressions) ELSE 0 END AS ctr,
+              CASE WHEN SUM(impressions) > 0 THEN SUM(position * impressions)/SUM(impressions) ELSE 0 END AS position
+         FROM gsc_snapshots
+         WHERE snapshot_date BETWEEN ? AND ? AND query IS NOT NULL
+         GROUP BY query
+         HAVING SUM(impressions) >= 10
+         ORDER BY impressions DESC
+         LIMIT ?`
+    )
+    .all(sinceDate, untilDate, limit) as TopQuery[];
 }
 
 export function listOpportunitiesByStatus(status: "pending" | "applied" | "rejected" | "expired", limit = 100) {
