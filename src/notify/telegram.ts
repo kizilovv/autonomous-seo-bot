@@ -5,6 +5,22 @@ import { logger } from "../logger.js";
 
 const BASE = "https://api.telegram.org";
 
+// Mute routine notifications (2026-06-29): owner wants DMs only when action is
+// required (job failures, pending approvals). Suppress the recurring "all good"
+// reports below; everything else — cron failures and any new/unseen alert —
+// still sends, so a real problem is never silently dropped.
+// Override: SEO_BOT_VERBOSE=true restores all notifications.
+const SEO_BOT_VERBOSE = process.env.SEO_BOT_VERBOSE === "true";
+const ROUTINE_NOTIFY_PATTERNS: RegExp[] = [
+  /New blog post auto-published/i, // routine blog auto-publish
+  /csboard-seo-bot daily report/i, // daily SEO report
+  /SEO verify \(last 24h\)/i,      // verification summary
+  /csboard-seo-bot online/i,       // startup ping
+];
+function isRoutineNotify(text: string): boolean {
+  return ROUTINE_NOTIFY_PATTERNS.some((re) => re.test(text));
+}
+
 export interface SendOptions {
   threadId?: string | number;
   silent?: boolean;
@@ -15,6 +31,10 @@ export interface SendOptions {
 export async function sendMessage(text: string, opts: SendOptions = {}): Promise<{ message_id?: number } | null> {
   if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
     logger.warn("telegram disabled (missing token or chat_id)");
+    return null;
+  }
+  if (!SEO_BOT_VERBOSE && isRoutineNotify(text)) {
+    logger.info({ head: text.slice(0, 60) }, "routine notify suppressed");
     return null;
   }
   const url = `${BASE}/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`;
