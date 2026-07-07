@@ -75,6 +75,13 @@ export function registerCrons(): void {
     const m = await import("./workers/ctr-feedback.js");
     return m.runCtrFeedback();
   }), TZ);
+  // Blog snippet guard + weekly progress digest (Mondays). Judges 14-28 day
+  // old blog meta edits (auto-revert regressions), surfaces next low-CTR
+  // sweep candidates, and reports site trend vs the 2026-07-07 baseline.
+  cron.schedule("0 19 * * 1", safe("blog-ctr-feedback", async () => {
+    const m = await import("./workers/blog-ctr-feedback.js");
+    return m.runBlogCtrFeedback();
+  }), TZ);
 
   logger.info(
     { blog_generator: BLOG_GENERATOR_ENABLED ? "on" : "off", dataforseo_pull: DFS_PULL_ENABLED ? "on" : "off" },
