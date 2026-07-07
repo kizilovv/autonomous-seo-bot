@@ -226,6 +226,24 @@ async function resolveImagesInBlocks(blocks: BlogBlocks, apiUrl?: string): Promi
   }
 }
 
+/** Cut at the last word boundary before maxLen — never mid-word, never "…". */
+function cutAtWord(s: string, maxLen: number): string {
+  const t = s.trim();
+  if (t.length <= maxLen) return t;
+  let cut = t.slice(0, maxLen);
+  cut = cut.slice(0, Math.max(cut.lastIndexOf(" "), Math.floor(maxLen * 0.6)));
+  return cut.replace(/[\s:,\-–—|&?]+$/, "");
+}
+
+/** SERP-safe meta title: full title when short, word-boundary cut when long,
+ *  " · CSBoard" brand suffix only when the total stays within ~65 chars. */
+function buildMetaTitle(title: string): string {
+  const t = title.trim();
+  if (t.length <= 50) return `${t} · CSBoard`;
+  if (t.length <= 65) return t;
+  return cutAtWord(t, 62);
+}
+
 function countWords(blocks: BlogBlocks): number {
   let n = 0;
   for (const b of blocks) {
@@ -354,8 +372,11 @@ Write the blocks now.`;
   const title = heroBlock?.title || topic.primary_query;
   const tldrBlock = blocks.find((b) => b.type === "tldr") as { items: string[] } | undefined;
   const excerpt = tldrBlock?.items?.slice(0, 2).join(" ").slice(0, 220) || title;
-  const meta_title = (title.length <= 60 ? title : title.slice(0, 57) + "…") + " · CSBoard";
-  const meta_description = excerpt.length <= 160 ? excerpt : excerpt.slice(0, 159) + "…";
+  // Meta title: never hard-cut mid-word with "…" (206 live posts shipped
+  // truncated titles like "…to CS2's Most … · CSBoard" — SERP poison).
+  // Word-boundary cut, no ellipsis; brand suffix only when it fits.
+  const meta_title = buildMetaTitle(title);
+  const meta_description = excerpt.length <= 160 ? excerpt : cutAtWord(excerpt, 157);
 
   // Faq array for legacy `faq` column persistence
   const faqBlock = blocks.find((b) => b.type === "faq") as { items: { q: string; a: string }[] } | undefined;
