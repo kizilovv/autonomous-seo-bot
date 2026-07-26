@@ -139,12 +139,65 @@ function buildClusters(rows: QueryRow[]): Cluster[] {
 // Booster (2026-05-04): lowered RU minima further — RU side under-generates vs EN.
 const MIN_CLUSTER_IMPS_BY_LOCALE: Record<"en" | "ru", number> = { en: 25, ru: 8 };
 const MIN_AVG_POSITION = 11; // pos >= 11 means we're not yet ranking a dedicated page
+
+// --- Cannibalisation guard (2026-07-26) -----------------------------------
+//
+// MIN_AVG_POSITION alone does not mean "we have no page for this". It is an
+// impression-weighted average over the whole cluster, so a cluster where one
+// page already ranks pos 6 and five stragglers sit at pos 20-56 averages well
+// above 11 and passes — which is exactly how the trade-bot cluster reached 22
+// competing URLs sharing ~22.7k impressions for 68 clicks, and Dragon Lore 12
+// URLs for 62. Every new article made the split worse, never better.
+//
+// So check the pages behind the cluster, not just the average:
+//   * something of ours already on page 1-2 → the win is to improve THAT page
+//   * three or more of our URLs already serving it → already cannibalised
+// Either way, publishing another article is the wrong move.
+const ALREADY_RANKING_POSITION = 15;
+const MAX_PAGES_PER_CLUSTER = 3;
+
+/**
+ * Reason to skip this cluster, or null when it is genuinely uncovered.
+ *
+ * "Do we already rank" is judged on the page carrying the MOST impressions in
+ * the cluster, at its impression-weighted position — not on the best position
+ * any single member reached. A cluster almost always contains some five-
+ * impression long-tail where a page happens to sit at #1; treating that as
+ * coverage would block real greenfield ("cs marketplace", pos 31, one page).
+ */
+function cannibalisationSkipReason(c: Cluster): string | null {
+  const byPage = new Map<string, { impressions: number; weightedPos: number }>();
+  for (const m of c.members) {
+    if (!m.page) continue;
+    const key = m.page.replace(/^https?:\/\/[^/]+/, "").replace(/\/$/, "");
+    const acc = byPage.get(key) ?? { impressions: 0, weightedPos: 0 };
+    acc.impressions += m.impressions;
+    acc.weightedPos += m.position * m.impressions;
+    byPage.set(key, acc);
+  }
+  if (byPage.size === 0) return null;
+
+  let topPage = "";
+  let top = { impressions: 0, weightedPos: 0 };
+  for (const [page, agg] of byPage) {
+    if (agg.impressions > top.impressions) { topPage = page; top = agg; }
+  }
+  const pos = top.weightedPos / Math.max(top.impressions, 1);
+  if (pos <= ALREADY_RANKING_POSITION) {
+    return `already ranking pos ${pos.toFixed(1)} with ${topPage}`;
+  }
+  if (byPage.size >= MAX_PAGES_PER_CLUSTER) {
+    return `${byPage.size} of our pages already serve this cluster`;
+  }
+  return null;
+}
 // Per-run topic generation cap. RU gets its own slot count so EN can't starve it.
 const MAX_TOPICS_PER_RUN_BY_LOCALE: Record<"en" | "ru", number> = { en: 5, ru: 5 };
 
 interface Stats {
   topics_detected: number;
   topics_skipped: number;
+  topics_cannibal_skipped: number;
   blogs_generated: number;
   blogs_failed: number;
   total_cost_usd: number;
@@ -153,7 +206,7 @@ interface Stats {
 
 export async function runBlogGenerator() {
   const id = startRun("blog-generator");
-  const stats: Stats = { topics_detected: 0, topics_skipped: 0, blogs_generated: 0, blogs_failed: 0, total_cost_usd: 0, budget_stopped: false };
+  const stats: Stats = { topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, total_cost_usd: 0, budget_stopped: false };
   try {
     // ---------- Phase A: detect topics ----------
     for (const site of gscSites()) {
@@ -162,6 +215,12 @@ export async function runBlogGenerator() {
       for (const c of clusters) {
         if (c.totalImpressions < MIN_CLUSTER_IMPS_BY_LOCALE[c.locale]) continue;
         if (c.avgPosition < MIN_AVG_POSITION) continue;
+        const skip = cannibalisationSkipReason(c);
+        if (skip) {
+          stats.topics_cannibal_skipped++;
+          logger.info({ cluster: c.primary, locale: c.locale, reason: skip }, "blog-generator: cluster skipped (cannibalisation guard)");
+          continue;
+        }
         // Skip if we already have a CMS page for this exact query as primary
         // (heuristic: check `seo_cms.content` for any path whose intro mentions the query)
         // Cheaper: just rely on `blog_topics` UNIQUE constraint to prevent duplicates.
@@ -244,7 +303,11 @@ export async function runBlogGenerator() {
         let body_html = draft.body_html;
         if (related.length) {
           const sectionTitle = topic.locale === "ru" ? "Похожие материалы" : "Related reads";
-          const linkBase = topic.locale === "ru" ? "https://csboard.trade" : "https://csboard.com";
+          // Single domain since 2026-07: csboard.trade is a blanket 302 to
+          // csboard.com. Emitting it here pointed every RU "Related reads" link
+          // at a redirect, so the internal link equity took a hop it did not
+          // need and the .trade host kept resurfacing in the index. One host.
+          const linkBase = "https://csboard.com";
           const mdLines = [
             "",
             `## ${sectionTitle}`,
