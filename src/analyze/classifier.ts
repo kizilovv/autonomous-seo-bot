@@ -13,6 +13,7 @@
 import { aggregateQueries, insertOpportunity, type OpportunityKind, getPageContent } from "../db/repo.js";
 import { gscSites } from "../config.js";
 import { logger } from "../logger.js";
+import { isPoisonedQuery } from "../quality/brand-guard.js";
 
 // Approximate CTR by SERP position (Google study averages, smoothed).
 const EXPECTED_CTR: Record<number, number> = {
@@ -116,6 +117,16 @@ export async function classifyAllSites(args: {
       if ((r.impressions || 0) < MIN_IMPRESSIONS_FOR_DETECTION) continue;
       // Brand queries are usually navigational — skip
       if (CSBOARD_BRAND_RE.test(r.query)) continue;
+      // Competitor-branded / raw-endpoint queries: we may well rank for them,
+      // but the traffic is developers reading someone else's docs, and every
+      // downstream gate *requires* the query text to appear in the copy — so
+      // targeting one puts a competitor's URL in our snippet. Drop before any
+      // opportunity (and any LLM spend) is created.
+      const poisoned = isPoisonedQuery(r.query);
+      if (poisoned) {
+        logger.debug({ query: r.query, reason: poisoned }, "classifier: query dropped by brand guard");
+        continue;
+      }
       if (!r.page) continue;
       // Skip non-canonical hosts (www., http://) — they are duplicates that
       // GSC reports separately. We only want canonical pages.

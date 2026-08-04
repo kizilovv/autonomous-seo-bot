@@ -1,6 +1,8 @@
 // Quality gate — runs on every LLM proposal BEFORE it gets persisted.
 // Rejects AI-slop, off-topic outputs, and barely-changed rewrites.
 
+import { findBrandViolation } from "./brand-guard.js";
+
 const FORBIDDEN_PHRASES_EN = [
   "in today's market",
   "in todays market",
@@ -150,6 +152,15 @@ export function runGate(input: GateInput): GateResult {
   const bad = findForbiddenPhrase(text, locale);
   if (bad) return { ok: false, reason: `forbidden phrase: "${bad}"` };
 
+  // 2b) Competitor brands / foreign domains. Must run BEFORE the query-coverage
+  // gate below: coverage *requires* the target query to appear in the text, so
+  // a poisoned query would otherwise force a competitor URL into our snippet
+  // (that is exactly how api.lis-skins.com/v1 reached the home description on
+  // 2026-07-16 and stayed live for three weeks). The classifier also drops such
+  // queries up front — this is the second lock, for hallucinated mentions.
+  const brand = findBrandViolation(text);
+  if (brand) return { ok: false, reason: brand };
+
   // 3) Query coverage (skip for title — it's a brand-only line sometimes)
   if (query && field !== "title") {
     if (!queryPresent(text, query)) {
@@ -185,6 +196,8 @@ export function runGateForFaqItem(item: { q: string; a: string }, query: string 
   if (item.a.length > 340) return { ok: false, reason: `FAQ a too long: ${item.a.length} chars` };
   const bad = findForbiddenPhrase(item.q + " " + item.a, locale);
   if (bad) return { ok: false, reason: `FAQ forbidden phrase: "${bad}"` };
+  const brand = findBrandViolation(item.q + " " + item.a);
+  if (brand) return { ok: false, reason: `FAQ ${brand}` };
   if (query && !queryPresent(item.q + " " + item.a, query)) {
     return { ok: false, reason: `FAQ doesn't address query "${query}"` };
   }

@@ -26,6 +26,7 @@ import { getDb } from "../db/connection.js";
 import { startRun, finishRun, failRun, insertOpportunity } from "../db/repo.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
+import { isPoisonedQuery } from "../quality/brand-guard.js";
 
 const REL = /(\b(cs|cs2|csgo|cs-go|counter[\s-]?strike)\b.*\b(skin|skins|knife|knives|glove|gloves|case|sticker|stickers|float|pattern|wear|inventory|market|marketplace|trade|trader|trading|buy|sell|sale|price|prices|cheap|cheapest|sticker|capsule)|^(knife|knives|glove|gloves|karambit|bayonet|butterfly|m9|stiletto|talon|skeleton|huntsman|ursus|nomad|paracord|navaja|gut|shadow|daggers|kukri|classic\sknife|driver\sgloves|hand\swraps|hydra\sgloves|moto\sgloves|specialist\sgloves|sport\sgloves|broken\sfang\sgloves)|^(awp|ak[\s-]?47|m4a1|m4a4|glock|usp|deagle|desert\seagle|sg\s553|aug|famas|p90|mac[\s-]?10|ump|mp5|mp7|mp9|p250|tec[\s-]?9|cz75|p2000|five[\s-]?seven|r8|revolver|nova|xm1014|m249|negev|ssg|scout)|(skinport|csmoney|cs\.money|dmarket|buff163|buff\.market|skin[\s-]?monkey|skin[\s-]?baron|loot[\s-]?bear|wax[\s-]?peer|tradeit|swap\.gg|cs\.deals)|^(steam\sinventory|steam\smarket|steam\strading|steam\stop[\s-]?up|topup\ssteam|trade[\s-]?up|float\schecker|inspect\slink|skin\stracker))/i;
 
@@ -85,6 +86,10 @@ function isCsboardRelevant(kw: string): boolean {
   const k = kw.toLowerCase();
   if (!k) return false;
   if (BLACK.test(k)) return false;
+  // A competitor's own branded keywords are the bulk of any ranked_keywords
+  // pull, and content targeting them can only be written by naming them —
+  // same trap that put api.lis-skins.com/v1 in the home description.
+  if (isPoisonedQuery(k)) return false;
   return REL.test(k);
 }
 
