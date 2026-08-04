@@ -117,16 +117,6 @@ export async function classifyAllSites(args: {
       if ((r.impressions || 0) < MIN_IMPRESSIONS_FOR_DETECTION) continue;
       // Brand queries are usually navigational — skip
       if (CSBOARD_BRAND_RE.test(r.query)) continue;
-      // Competitor-branded / raw-endpoint queries: we may well rank for them,
-      // but the traffic is developers reading someone else's docs, and every
-      // downstream gate *requires* the query text to appear in the copy — so
-      // targeting one puts a competitor's URL in our snippet. Drop before any
-      // opportunity (and any LLM spend) is created.
-      const poisoned = isPoisonedQuery(r.query);
-      if (poisoned) {
-        logger.debug({ query: r.query, reason: poisoned }, "classifier: query dropped by brand guard");
-        continue;
-      }
       if (!r.page) continue;
       // Skip non-canonical hosts (www., http://) — they are duplicates that
       // GSC reports separately. We only want canonical pages.
@@ -134,6 +124,18 @@ export async function classifyAllSites(args: {
 
       const lp = urlToLocalePath(r.page);
       if (!lp) continue;
+
+      // Competitor-branded / raw-endpoint queries: we may well rank for them,
+      // but the traffic is developers reading someone else's docs, and every
+      // downstream gate *requires* the query text to appear in the copy — so
+      // targeting one puts a competitor's URL in our snippet. Drop before any
+      // opportunity (and any LLM spend) exists. Comparison pages keep their
+      // "<competitor> alternative" demand; endpoint lookups die everywhere.
+      const poisoned = isPoisonedQuery(r.query, lp.path);
+      if (poisoned) {
+        logger.debug({ query: r.query, path: lp.path, reason: poisoned }, "classifier: query dropped by brand guard");
+        continue;
+      }
 
       const pos = r.position;
 

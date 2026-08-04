@@ -54,6 +54,7 @@ export interface GateInput {
   field: string;         // 'title' | 'description' | 'intro_extra' | 'faq'
   current: string | null; // current value in CMS (if any) for similarity check
   locale: "en" | "ru";
+  path?: string | null;  // CMS path — comparison pages may name competitors
 }
 
 export interface GateResult {
@@ -138,7 +139,7 @@ const FIELD_MAX_CHARS: Record<string, number> = {
  * Run all gates. Returns {ok:false, reason} on the first failure.
  */
 export function runGate(input: GateInput): GateResult {
-  const { text, query, field, current, locale } = input;
+  const { text, query, field, current, locale, path } = input;
 
   if (!text || !text.trim()) return { ok: false, reason: "empty proposal" };
 
@@ -158,7 +159,7 @@ export function runGate(input: GateInput): GateResult {
   // (that is exactly how api.lis-skins.com/v1 reached the home description on
   // 2026-07-16 and stayed live for three weeks). The classifier also drops such
   // queries up front — this is the second lock, for hallucinated mentions.
-  const brand = findBrandViolation(text);
+  const brand = findBrandViolation(text, path);
   if (brand) return { ok: false, reason: brand };
 
   // 3) Query coverage (skip for title — it's a brand-only line sometimes)
@@ -189,14 +190,14 @@ export function runGate(input: GateInput): GateResult {
 /**
  * FAQ-specific gate (different shape — array of {q,a}).
  */
-export function runGateForFaqItem(item: { q: string; a: string }, query: string | null, locale: "en" | "ru"): GateResult {
+export function runGateForFaqItem(item: { q: string; a: string }, query: string | null, locale: "en" | "ru", path?: string | null): GateResult {
   if (!item.q || item.q.length < 12) return { ok: false, reason: "FAQ q too short" };
   if (item.q.length > 150) return { ok: false, reason: `FAQ q too long: ${item.q.length} chars` };
   if (!item.a || item.a.length < 60) return { ok: false, reason: "FAQ a too short" };
   if (item.a.length > 340) return { ok: false, reason: `FAQ a too long: ${item.a.length} chars` };
   const bad = findForbiddenPhrase(item.q + " " + item.a, locale);
   if (bad) return { ok: false, reason: `FAQ forbidden phrase: "${bad}"` };
-  const brand = findBrandViolation(item.q + " " + item.a);
+  const brand = findBrandViolation(item.q + " " + item.a, path);
   if (brand) return { ok: false, reason: `FAQ ${brand}` };
   if (query && !queryPresent(item.q + " " + item.a, query)) {
     return { ok: false, reason: `FAQ doesn't address query "${query}"` };

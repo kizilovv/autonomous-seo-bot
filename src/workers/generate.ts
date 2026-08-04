@@ -123,7 +123,7 @@ export async function runGenerate(): Promise<GenerateStats> {
 
         // Quality gate.
         if (opp.field === "faq") {
-          const gate = runGateForFaqItem(value as { q: string; a: string }, opp.query, opp.locale as "en" | "ru");
+          const gate = runGateForFaqItem(value as { q: string; a: string }, opp.query, opp.locale as "en" | "ru", opp.path);
           if (!gate.ok) {
             stats.failed++;
             rejectOpportunity(opp.id, `quality-gate: ${gate.reason}`);
@@ -136,6 +136,7 @@ export async function runGenerate(): Promise<GenerateStats> {
             field: opp.field as string,
             current: currentStr,
             locale: opp.locale as "en" | "ru",
+            path: opp.path,
           });
           if (!gate.ok) {
             stats.failed++;

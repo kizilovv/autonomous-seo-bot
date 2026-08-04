@@ -90,24 +90,45 @@ export function findForeignDomain(text: string): string | null {
  * that will never convert, and targeting them puts someone else's brand in
  * our snippet.
  */
-export function isPoisonedQuery(query: string | null | undefined): string | null {
+export function isPoisonedQuery(query: string | null | undefined, path?: string | null): string | null {
   if (!query) return null;
-  const competitor = findCompetitorMention(query);
-  if (competitor) return `competitor brand in query: "${competitor}"`;
+  // A comparison page is allowed to chase "<competitor> alternative" demand —
+  // that is its whole reason to exist. Everywhere else a competitor-branded
+  // query can only be answered by naming them, on a page that shouldn't.
+  if (!allowsCompetitorMentions(path)) {
+    const competitor = findCompetitorMention(query);
+    if (competitor) return `competitor brand in query: "${competitor}"`;
+  }
   const domain = findForeignDomain(query);
   if (domain) return `foreign domain in query: "${domain}"`;
   // API-endpoint-shaped lookups ("/v1/user/balance", "api.<something>") are
-  // developer traffic hunting someone else's docs, not buyers.
+  // developer traffic hunting someone else's docs, not buyers — no page of
+  // ours should be rewritten to court them.
   if (/\/v\d\b|\bapi\.[a-z0-9-]+\b/i.test(query)) return "API endpoint lookup, not buyer intent";
   return null;
 }
 
 /**
- * True when generated copy must be rejected before it reaches the CMS.
+ * Pages whose whole purpose is a side-by-side with named marketplaces. Naming
+ * a competitor there is the content, not a leak — the existing copy on both
+ * already does it. Everywhere else (home above all) it is a defect.
  */
-export function findBrandViolation(text: string): string | null {
-  const competitor = findCompetitorMention(text);
-  if (competitor) return `competitor mention: "${competitor}"`;
+const COMPARISON_PATHS = new Set(["/comparison", "/cs2-trading-sites"]);
+
+export function allowsCompetitorMentions(path: string | null | undefined): boolean {
+  return !!path && COMPARISON_PATHS.has(path);
+}
+
+/**
+ * True when generated copy must be rejected before it reaches the CMS.
+ * `path` opts comparison pages out of the competitor-name check only — a bare
+ * foreign domain still never belongs in a snippet.
+ */
+export function findBrandViolation(text: string, path?: string | null): string | null {
+  if (!allowsCompetitorMentions(path)) {
+    const competitor = findCompetitorMention(text);
+    if (competitor) return `competitor mention: "${competitor}"`;
+  }
   const domain = findForeignDomain(text);
   if (domain) return `foreign domain: "${domain}"`;
   return null;
