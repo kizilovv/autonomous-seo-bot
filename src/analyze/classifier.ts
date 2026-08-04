@@ -51,15 +51,26 @@ function expectedCtrFor(position: number): number {
 // for trash long-tail (5 imp/mo) which produced AI-slop content with zero
 // payback. Snippet rewrites are still cheap so the bar there stays low; body
 // content (intro_extra/faq) requires real demand to justify modifying the page.
+// 2026-08-05: re-based. These floors were tuned against snapshots that summed
+// 28 overlapping 28-day windows, so a "15 impression" query really had ~0.5 —
+// the floor was doing nothing at all. Now that rows are per-day (migration 008)
+// the numbers mean what they say, and the floors are set to real demand.
 const MIN_IMPS_BY_KIND: Record<string, number> = {
-  snippet_rewrite: 15,
-  ctr_regression: 15,
-  rank_push: 30,
-  content_enrich: 30,
-  lost_ranking: 5,
-  schema_gap: 5,
+  snippet_rewrite: 40,
+  ctr_regression: 40,
+  rank_push: 80,
+  content_enrich: 80,
+  lost_ranking: 20,
+  schema_gap: 20,
 };
-const MIN_IMPRESSIONS_FOR_DETECTION = 15; // generic floor; per-kind in classify()
+const MIN_IMPRESSIONS_FOR_DETECTION = 20; // generic floor; per-kind in classify()
+
+/**
+ * Minimum share of a page's impressions a query must hold before it is allowed
+ * to drive a rewrite of that page's shared snippet. 5% ≈ "this query is a real
+ * part of what the page is for", not a stray long-tail hit.
+ */
+const MIN_QUERY_SHARE = 0.05;
 
 /**
  * Only these path prefixes render CMS `intro_extra` / `faq` body fields via
@@ -108,6 +119,26 @@ export async function classifyAllSites(args: {
   for (const site of gscSites()) {
     logger.info({ site }, "classifier: site start");
     const curr = aggregateQueries(site, args.currSince, args.currUntil);
+
+    // Page-level totals. A snippet serves the WHOLE page, so a single query's
+    // verdict on it is only meaningful in proportion to the page's traffic —
+    // see MIN_QUERY_SHARE / healthyPage below.
+    const pageTotals = new Map<string, { impressions: number; clicks: number; posWeighted: number }>();
+    for (const r of curr) {
+      if (!r.page) continue;
+      const t = pageTotals.get(r.page) ?? { impressions: 0, clicks: 0, posWeighted: 0 };
+      t.impressions += r.impressions;
+      t.clicks += r.clicks;
+      t.posWeighted += r.position * r.impressions;
+      pageTotals.set(r.page, t);
+    }
+    /** True when the page's own CTR already meets what its average position earns. */
+    const healthyPage = (page: string): boolean => {
+      const t = pageTotals.get(page);
+      if (!t || t.impressions < 100) return false;
+      const avgPos = t.posWeighted / t.impressions;
+      return t.clicks / t.impressions >= expectedCtrFor(avgPos);
+    };
     // Build a query→aggregate map for prev window if provided
     const prev = args.prevSince && args.prevUntil ? aggregateQueries(site, args.prevSince, args.prevUntil) : [];
     const prevByQuery = new Map<string, (typeof prev)[number]>();
@@ -142,7 +173,20 @@ export async function classifyAllSites(args: {
       // ---------- snippet_rewrite (top-10 underperforming CTR) ----------
       if (pos >= 1 && pos <= 10) {
         const expected = expectedCtrFor(pos);
-        if (r.impressions >= MIN_IMPS_BY_KIND.snippet_rewrite && r.ctr < expected * 0.8) {
+        const pageImps = pageTotals.get(r.page)?.impressions ?? r.impressions;
+        // A snippet is one string shared by every query the page ranks for.
+        // Rewriting it because a query worth 1% of the page's impressions
+        // underperforms is how the home description — 38% CTR on brand
+        // traffic — ended up chasing a 100-impression developer lookup for
+        // three weeks. Only a query with real weight on the page gets a say,
+        // and a page already earning its position is left alone entirely.
+        const share = pageImps > 0 ? r.impressions / pageImps : 1;
+        if (
+          r.impressions >= MIN_IMPS_BY_KIND.snippet_rewrite &&
+          r.ctr < expected * 0.8 &&
+          share >= MIN_QUERY_SHARE &&
+          !healthyPage(r.page)
+        ) {
           insertOpportunity({
             kind: "snippet_rewrite",
             locale: lp.locale,
@@ -205,7 +249,12 @@ export async function classifyAllSites(args: {
         const p = prevByQuery.get(r.query)!;
         const positionDelta = Math.abs(pos - p.position);
         const clickDrop = p.clicks > 0 ? (p.clicks - r.clicks) / p.clicks : 0;
-        if (positionDelta < 1.5 && clickDrop > 0.3 && p.clicks >= 5) {
+        const regShare = (pageTotals.get(r.page)?.impressions ?? r.impressions) > 0
+          ? r.impressions / (pageTotals.get(r.page)!.impressions)
+          : 1;
+        // Same reasoning as snippet_rewrite: the snippet is shared, so only a
+        // query that carries the page may claim its regression.
+        if (positionDelta < 1.5 && clickDrop > 0.3 && p.clicks >= 5 && regShare >= MIN_QUERY_SHARE) {
           insertOpportunity({
             kind: "ctr_regression",
             locale: lp.locale,

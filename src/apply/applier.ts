@@ -105,6 +105,14 @@ export async function runApply(_perBatch = 30): Promise<ApplyStats> {
   // Track URLs that actually got auto-applied this run, ping IndexNow at the end.
   const changedUrls = new Set<string>();
 
+  // One write per (locale, path, field) per run. `description`/`title`/`intro_extra`
+  // are REPLACE fields: on 2026-07-24 five different home descriptions were written
+  // within 50ms of each other and the last one in array order won, so the live
+  // snippet was decided by iteration order rather than by which query mattered.
+  // `faq` is exempt — applyAuto appends there and already de-dups by question.
+  const writtenFields = new Set<string>();
+  const fieldKey = (o: OpportunityRow) => `${o.locale}|${o.path}|${o.field}`;
+
   for (let round = 0; round < 20; round++) {
     const pending = pendingOpportunitiesReady(PER_BATCH);
     if (!pending.length) break;
@@ -115,9 +123,20 @@ export async function runApply(_perBatch = 30): Promise<ApplyStats> {
         const todayAuto = autoCountToday();
         const gate = decide(opp, todayAuto);
         if (gate.decision === "auto") {
+          if (opp.field && opp.field !== "faq" && writtenFields.has(fieldKey(opp))) {
+            // A higher-demand proposal already claimed this field this run.
+            // Reject rather than defer: the field it was measured against no
+            // longer exists, so tomorrow's classifier should re-detect from
+            // the new baseline instead of this stale proposal landing blind.
+            stats.blocked++;
+            rejectOpportunity(opp.id, `superseded: ${opp.locale}${opp.path}/${opp.field} already rewritten this run`);
+            stats.details.push(`⤼ #${opp.id} superseded (${opp.field} already written)`);
+            continue;
+          }
           const r = await applyAuto(opp);
           if (r.ok) {
             stats.auto_applied++;
+            if (opp.field && opp.field !== "faq") writtenFields.add(fieldKey(opp));
             stats.details.push(`✓ #${opp.id} ${opp.locale}${opp.path}/${opp.field} (auto)`);
             const url = fullUrlFor(opp.locale, opp.path);
             if (url) changedUrls.add(url);

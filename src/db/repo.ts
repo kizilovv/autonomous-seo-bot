@@ -212,8 +212,12 @@ export interface GscRow {
 export function insertGscRows(rows: GscRow[]): number {
   if (!rows.length) return 0;
   return tx((db: Database) => {
+    // REPLACE, not INSERT: the nightly pull re-fetches a rolling correction
+    // window, so the same (site, date, query, page) legitimately arrives again
+    // with revised numbers once GSC finalises it. Uniqueness comes from
+    // idx_gsc_unique_row (migration 008).
     const stmt = db.prepare(
-      `INSERT INTO gsc_snapshots (site, snapshot_date, query, page, impressions, clicks, ctr, position, country, device)
+      `INSERT OR REPLACE INTO gsc_snapshots (site, snapshot_date, query, page, impressions, clicks, ctr, position, country, device)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     let n = 0;
@@ -256,6 +260,17 @@ export function latestSnapshotDate(table: "gsc_snapshots" | "ga4_snapshots"): st
   const db = getDb();
   const row = db.prepare(`SELECT MAX(snapshot_date) AS d FROM ${table}`).get() as { d: string | null };
   return row.d ?? null;
+}
+
+/**
+ * Newest day we hold GSC rows for, or null when the table is empty (first run,
+ * or right after migration 008 wiped the old window-aggregate rows). The pull
+ * worker uses it to decide between a backfill and a short correction window.
+ */
+export function latestGscSnapshotDate(): string | null {
+  const db = getDb();
+  const r = db.prepare("SELECT MAX(snapshot_date) AS d FROM gsc_snapshots").get() as { d: string | null };
+  return r?.d ?? null;
 }
 
 export function purgeOldSnapshots(keepDays = 90): { gsc: number; ga4: number } {
@@ -347,7 +362,16 @@ export function pendingOpportunitiesReady(limit = 50) {
   const db = getDb();
   return db
     .prepare(
-      `SELECT * FROM opportunities WHERE status = 'pending' AND proposed_value IS NOT NULL ORDER BY detected_at DESC LIMIT ?`
+      // Highest-demand first. The applier writes at most one proposal per
+      // (locale, path, field) per run, so whichever row comes out on top here
+      // is the one that lands — ordering by detected_at alone meant a 15-impression
+      // long-tail rewrite could overwrite a 4000-impression one purely by arrival
+      // order. json_valid() guards rows whose metrics never parsed.
+      `SELECT * FROM opportunities
+        WHERE status = 'pending' AND proposed_value IS NOT NULL
+        ORDER BY CAST(COALESCE(CASE WHEN json_valid(metrics) THEN json_extract(metrics, '$.impressions') END, 0) AS INTEGER) DESC,
+                 detected_at DESC
+        LIMIT ?`
     )
     .all(limit) as Array<OpportunityRow & { id: number; status: string; detected_at: string }>;
 }
