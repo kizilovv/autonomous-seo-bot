@@ -116,7 +116,11 @@ export function isPoisonedQuery(query: string | null | undefined, path?: string 
 const COMPARISON_PATHS = new Set(["/comparison", "/cs2-trading-sites"]);
 
 export function allowsCompetitorMentions(path: string | null | undefined): boolean {
-  return !!path && COMPARISON_PATHS.has(path);
+  if (!path) return false;
+  // Blog posts are editorial: blog-post.ts explicitly instructs factual,
+  // vendor-neutral comparison and names competitors by design.
+  if (path.startsWith("/blog")) return true;
+  return COMPARISON_PATHS.has(path);
 }
 
 /**
