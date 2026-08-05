@@ -78,8 +78,10 @@ const OUR_BRANDS = new Set([
   "stattrak", "stattrak™", "steam",
   "usdt", "usdc", "trc20", "bep20", "erc20",
   "buff163",
-  // payment rails we operate and must be able to name on their own pages
-  "antilopay", "fungies", "nowpayments", "paybridge",
+  // payment rails we actually pay out on and must be able to name — PayPal is
+  // a real withdrawal rail via PayBridge (see backend routes/balance.ts), and
+  // /sell has advertised it since 2026-07 on purpose.
+  "antilopay", "fungies", "nowpayments", "paybridge", "paypal", "paypal's",
 ]);
 
 /**
