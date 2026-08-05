@@ -180,8 +180,14 @@ export function findBrandViolation(text: string, path?: string | null): string |
   if (!allowsCompetitorMentions(path)) {
     const competitor = findCompetitorMention(text);
     if (competitor) return `competitor mention: "${competitor}"`;
-    const foreign = findForeignBrandToken(text);
-    if (foreign) return `foreign brand name: "${foreign}"`;
+    // Item pages are exempt from the SHAPE rule (not from the competitor list):
+    // their copy is built from the item's own name, and CS2 itself is full of
+    // camelCase — "Five-SeveN", and every team sticker from "iBUYPOWER" to
+    // "FaZe". The explicit competitor list still guards them.
+    if (!path || !path.startsWith("/items")) {
+      const foreign = findForeignBrandToken(text);
+      if (foreign) return `foreign brand name: "${foreign}"`;
+    }
   }
   const domain = findForeignDomain(text);
   if (domain) return `foreign domain: "${domain}"`;
