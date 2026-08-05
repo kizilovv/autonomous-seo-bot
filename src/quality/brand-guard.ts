@@ -104,9 +104,13 @@ const OUR_BRANDS = new Set([
 const BRANDISH = /[a-z][A-Z]|[A-Z]{2,}[a-z]/;
 const TOKEN_RE = /[A-Za-z][A-Za-z0-9.™:]*(?:-[A-Za-z0-9]+)*/g;
 
+/** "SMGs", "AWPs", "NFTs" — a pluralised acronym, not an acronym glued to a word. */
+const PLURAL_ACRONYM = /^[A-Z0-9]{2,}s$/;
+
 export function findForeignBrandToken(text: string): string | null {
   for (const m of text.match(TOKEN_RE) ?? []) {
     if (!BRANDISH.test(m)) continue;
+    if (PLURAL_ACRONYM.test(m)) continue;
     if (OUR_BRANDS.has(m.toLowerCase().replace(/[.,;:!?]+$/, ""))) continue;
     return m;
   }
