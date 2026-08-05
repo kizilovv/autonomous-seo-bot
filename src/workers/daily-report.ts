@@ -1,7 +1,7 @@
 // Daily Telegram digest — ONE message, full picture: GSC totals (7d vs prior 7d),
 // applied today (with diffs), pending stuck items, spend.
 import { gscSites, config } from "../config.js";
-import { aggregateQueries, listOpportunitiesByStatus, getSpend } from "../db/repo.js";
+import { aggregateQueries, listOpportunitiesByStatus, getSpend, latestGscSnapshotDate } from "../db/repo.js";
 import { sendMessage, esc, bullets } from "../notify/telegram.js";
 import { startRun, finishRun, failRun } from "../db/repo.js";
 import { getDb } from "../db/connection.js";
@@ -9,6 +9,21 @@ import { logger } from "../logger.js";
 
 function offsetDate(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 86400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Both comparison windows must be anchored to the newest day we actually hold,
+ * not to today. GSC finalises with a 1-3 day lag, so a today-anchored "last 7
+ * days" contained only the 5 days that had arrived while the prior window had
+ * all 7 — the digest reported "-28% clicks" on 2026-08-05 purely because 5/7 is
+ * 0.71, on a site whose weekly clicks had in fact gone 243 → 1804 since May.
+ * A daily report that cries wolf every day is worse than no report.
+ */
+function anchoredWindows(): { currSince: string; currUntil: string; prevSince: string; prevUntil: string } {
+  const anchor = latestGscSnapshotDate() ?? offsetDate(1);
+  const back = (days: number) =>
+    new Date(Date.parse(anchor + "T00:00:00Z") - days * 86400_000).toISOString().slice(0, 10);
+  return { currSince: back(6), currUntil: anchor, prevSince: back(13), prevUntil: back(7) };
 }
 
 interface SiteRollup {
@@ -44,11 +59,12 @@ export async function runDailyReport() {
     lines.push(`<i>${esc(new Date().toUTCString())}</i>\n`);
 
     // ---- per-site rollup ----
-    lines.push(`<b>GSC last 7d vs prior 7d</b>`);
+    const win = anchoredWindows();
+    lines.push(`<b>GSC 7d vs prior 7d</b> <i>(through ${esc(win.currUntil)})</i>`);
     const rollups: SiteRollup[] = [];
     for (const site of gscSites()) {
-      const curr = rollup(site, offsetDate(7), offsetDate(1));
-      const prev = rollup(site, offsetDate(14), offsetDate(8));
+      const curr = rollup(site, win.currSince, win.currUntil);
+      const prev = rollup(site, win.prevSince, win.prevUntil);
       const dc = prev.clicks ? ((curr.clicks - prev.clicks) / prev.clicks) * 100 : 0;
       const di = prev.imps ? ((curr.imps - prev.imps) / prev.imps) * 100 : 0;
       rollups.push({
