@@ -19,6 +19,10 @@ Hard facts you can reference:
 - Zero trading fees / zero commission
 - Trades happen through Steam's official trading system (safe)
 DO NOT invent features. DO NOT use generic SEO-spam phrases ("welcome to the world of...", "in today's market...").
+NEVER name any other site, marketplace, brand or API — not even one that appears in the
+search query. Queries often carry a rival's name ("... playbattlesquare", "api.lis-skins.com/v1"):
+write to the INTENT behind such a query and leave the name out entirely. CSBoard is the only
+platform you may name; Steam and Buff163 may be named as the trading system and price source.
 `;
 
 function truncate(s: string, max: number): string {
@@ -47,7 +51,8 @@ export async function genSnippet(opp: OpportunityRow): Promise<{ field: string; 
 Task: rewrite the meta ${target} for a CSBoard page so users actually click.
 Hard rules:
 - ${target === "title" ? "50-60 characters total" : "140-160 characters total"}
-- Naturally include the search query the page already ranks for
+- Naturally include the search query the page already ranks for, MINUS any third-party
+  name in it (drop the name, keep the intent)
 - ${isRu ? "Output in Russian (Cyrillic), match Russian search intent." : "Output in English."}
 - One line. NO quotes, NO labels, just the ${target} text itself.
 - End title with " — CSBoard" if length permits.

@@ -69,6 +69,45 @@ const COMPETITOR_RE = new RegExp(
 );
 
 /**
+ * Brand names we DO write. Everything else that looks like a brand is treated
+ * as foreign — see findForeignBrandToken.
+ */
+const OUR_BRANDS = new Set([
+  "csboard", "csboard.com", "csboard.trade", "csboard's",
+  "cs2", "csgo", "cs:go", "counter-strike",
+  "stattrak", "stattrak™", "steam",
+  "usdt", "usdc", "trc20", "bep20", "erc20",
+  "buff163",
+  // payment rails we operate and must be able to name on their own pages
+  "antilopay", "fungies", "nowpayments", "paybridge",
+]);
+
+/**
+ * Tokens shaped like a brand name: camelCase ("PlayBattleSquare"), an acronym
+ * glued to a word ("CSfade", "DMarket", "CSFloat"), or Hyphen-Capitalised
+ * ("Lis-Skins"). Ordinary prose never looks like this — a sentence-initial
+ * "Selling" or a skin name like "Calligrafaux" has a single leading capital
+ * and is left alone, and weapon codes ("AK-47", "M4A1-S", "XM1014") carry no
+ * lowercase after their capitals.
+ *
+ * This is the generic form of the competitor list below. The list only knows
+ * the rivals we thought of; on 2026-08-05 the bot answered the GSC query
+ * "selling cs2 skins internationally playbattlesquare" by putting
+ * PlayBattleSquare — a site nobody had listed — into the /sell description.
+ */
+const BRANDISH = /[a-z][A-Z]|[A-Z]{2,}[a-z]|[A-Za-z]-[A-Z][a-z]/;
+const TOKEN_RE = /[A-Za-z][A-Za-z0-9.™:]*(?:-[A-Za-z0-9]+)*/g;
+
+export function findForeignBrandToken(text: string): string | null {
+  for (const m of text.match(TOKEN_RE) ?? []) {
+    if (!BRANDISH.test(m)) continue;
+    if (OUR_BRANDS.has(m.toLowerCase().replace(/[.,;:!?]+$/, ""))) continue;
+    return m;
+  }
+  return null;
+}
+
+/**
  * First competitor term found in `text`, or null. Case-insensitive.
  */
 export function findCompetitorMention(text: string): string | null {
@@ -99,6 +138,11 @@ export function isPoisonedQuery(query: string | null | undefined, path?: string 
     const competitor = findCompetitorMention(query);
     if (competitor) return `competitor brand in query: "${competitor}"`;
   }
+  // Search queries arrive lowercased, so the brandish shape can't be read off
+  // them — but a query that glues a third-party site name onto a CS2 phrase
+  // ("selling cs2 skins internationally playbattlesquare") is navigational to
+  // someone else either way. Catching it needs the token list; the shape rule
+  // in findForeignBrandToken is what stops the unlisted ones reaching the CMS.
   const domain = findForeignDomain(query);
   if (domain) return `foreign domain in query: "${domain}"`;
   // API-endpoint-shaped lookups ("/v1/user/balance", "api.<something>") are
@@ -132,6 +176,8 @@ export function findBrandViolation(text: string, path?: string | null): string |
   if (!allowsCompetitorMentions(path)) {
     const competitor = findCompetitorMention(text);
     if (competitor) return `competitor mention: "${competitor}"`;
+    const foreign = findForeignBrandToken(text);
+    if (foreign) return `foreign brand name: "${foreign}"`;
   }
   const domain = findForeignDomain(text);
   if (domain) return `foreign domain: "${domain}"`;
