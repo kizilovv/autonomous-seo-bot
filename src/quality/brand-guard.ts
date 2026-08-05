@@ -83,19 +83,23 @@ const OUR_BRANDS = new Set([
 ]);
 
 /**
- * Tokens shaped like a brand name: camelCase ("PlayBattleSquare"), an acronym
- * glued to a word ("CSfade", "DMarket", "CSFloat"), or Hyphen-Capitalised
- * ("Lis-Skins"). Ordinary prose never looks like this — a sentence-initial
- * "Selling" or a skin name like "Calligrafaux" has a single leading capital
- * and is left alone, and weapon codes ("AK-47", "M4A1-S", "XM1014") carry no
- * lowercase after their capitals.
+ * Tokens shaped like a brand name: camelCase ("PlayBattleSquare") or an acronym
+ * glued to a word ("CSfade", "DMarket", "CSFloat"). Ordinary prose never looks
+ * like this — a sentence-initial "Selling" or a skin name like "Calligrafaux"
+ * has a single leading capital and is left alone, and weapon codes ("AK-47",
+ * "M4A1-S", "XM1014") carry no lowercase after their capitals.
+ *
+ * Hyphen-Capitalised words are deliberately NOT a trigger: that shape belongs
+ * to CS2 vocabulary ("Field-Tested", "Battle-Scarred", "Counter-Strike",
+ * "Five-SeveN") far more often than to a brand, and the hyphenated rivals that
+ * do exist ("Lis-Skins") are already covered by COMPETITOR_TERMS.
  *
  * This is the generic form of the competitor list below. The list only knows
  * the rivals we thought of; on 2026-08-05 the bot answered the GSC query
  * "selling cs2 skins internationally playbattlesquare" by putting
  * PlayBattleSquare — a site nobody had listed — into the /sell description.
  */
-const BRANDISH = /[a-z][A-Z]|[A-Z]{2,}[a-z]|[A-Za-z]-[A-Z][a-z]/;
+const BRANDISH = /[a-z][A-Z]|[A-Z]{2,}[a-z]/;
 const TOKEN_RE = /[A-Za-z][A-Za-z0-9.™:]*(?:-[A-Za-z0-9]+)*/g;
 
 export function findForeignBrandToken(text: string): string | null {
