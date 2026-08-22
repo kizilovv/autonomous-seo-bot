@@ -245,6 +245,34 @@ function cutAtWord(s: string, maxLen: number): string {
 const DANGLING_TAIL_RE =
   /[\s]+(?:the|a|an|and|or|but|to|of|for|in|on|at|by|with|without|from|into|about|as|is|are|was|were|be|been|that|this|these|those|which|who|whom|whose|what|why|how|when|where|its|it's|your|our|their|his|her|my|no|not|most|more|less|best|worst|new|all|any|every|each|some|such|than|then|so|if|vs|via|only|just|still|even|really)$|[\s]+(?:и|или|но|в|во|на|за|для|при|от|до|из|по|с|со|к|ко|о|об|у|над|под|про|через|без|перед|между|после|это|этот|эта|эти|тот|та|те|как|что|чем|чтобы|же|ли|бы|не|ни|его|её|их|наш|ваш|свой|самый|более|менее|все|всё|весь|вся|уже|ещё|еще|очень|тоже|также)$|[\s]+[а-яa-z]{1,2}$/i;
 
+/**
+ * Does this stored meta value read as cut off?
+ *
+ * Deliberately CONSERVATIVE, and the conservatism is the point: the repair
+ * script rewrites whatever this flags, so a false positive silently reverts a
+ * healthy title — including the hand-fixes from the 2026-07-08 sweep, several
+ * of which sit on top-traffic pages. It therefore only fires on evidence that
+ * is unambiguous: a trailing ellipsis, or an ending on a word that cannot
+ * legally end a phrase. Titles cut at a real word ("… Full Drop") are missed
+ * on purpose — there is no mechanical way to tell them from a complete noun
+ * phrase ("… Complete 2026 Guide"), and the generator fix stops new ones.
+ */
+export function looksTruncatedTitle(metaTitle: string | null | undefined): boolean {
+  const t = (metaTitle ?? "").trim();
+  if (!t) return false;
+  if (/[…]|\.\.\.$/.test(t)) return true;
+  const withoutBrand = t.replace(/\s*[·—|]\s*CSBoard\s*$/i, "").trim();
+  return DANGLING_TAIL_RE.test(withoutBrand);
+}
+
+/** A description that does not end on sentence punctuation was cropped. */
+export function looksTruncatedDescription(metaDescription: string | null | undefined): boolean {
+  const d = (metaDescription ?? "").trim();
+  if (!d) return true;
+  if (/[…]|\.\.\.$/.test(d)) return true;
+  return !/[.!?»"')\]]$/.test(d);
+}
+
 /** Strip every trailing word that leaves the phrase hanging, plus stray punctuation. */
 function trimDangling(s: string): string {
   let t = s.trim().replace(/[\s:,\-–—|&?/]+$/, "");

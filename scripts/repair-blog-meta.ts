@@ -26,7 +26,12 @@
  *   cp data/seo.db data/seo.db.bak-$(date +%Y%m%d-%H%M%S)-blogmeta
  */
 import { getDb } from "../src/db/connection.js";
-import { buildMetaTitle, buildMetaDescription } from "../src/generate/blocks-generator.js";
+import {
+  buildMetaTitle,
+  buildMetaDescription,
+  looksTruncatedTitle,
+  looksTruncatedDescription,
+} from "../src/generate/blocks-generator.js";
 import type { BlogBlocks } from "../src/generate/blocks-schema.js";
 
 const APPLY = process.argv.includes("--apply");
@@ -69,15 +74,23 @@ function main() {
 
   const run = db.transaction((list: Row[]) => {
     for (const r of list) {
-      const nextTitle = buildMetaTitle(r.title);
+      // Only touch a field that is DEMONSTRABLY broken. The first dry run of
+      // this script rewrote all 374 titles, including "Best CS2 Trade Bot in
+      // 2026 — CSBoard" (16,402 impressions, perfectly fine, and itself the
+      // product of the 2026-07-08 hand sweep). Rewriting a healthy title on a
+      // top page is a risk taken for nothing.
+      const nextTitle = looksTruncatedTitle(r.meta_title) ? buildMetaTitle(r.title) : r.meta_title;
       const items = tldrItems(r.body_blocks);
       // Without tldr items there is nothing to rebuild a description FROM.
       // Leave it alone rather than invent one — a stale description beats a
       // fabricated one, and the generator fix covers everything published from
       // here on.
-      const nextDesc = items.length ? buildMetaDescription(items, r.title) : r.meta_description;
+      const nextDesc =
+        looksTruncatedDescription(r.meta_description) && items.length
+          ? buildMetaDescription(items, r.title)
+          : r.meta_description;
 
-      const tChanged = nextTitle !== r.meta_title;
+      const tChanged = !!nextTitle && nextTitle !== r.meta_title;
       const dChanged = !!nextDesc && nextDesc !== r.meta_description;
       if (!items.length && !r.meta_description) skippedNoSource.push(`${r.locale}/${r.slug}`);
 
@@ -99,7 +112,7 @@ function main() {
           console.log(`  D+ ${nextDesc}`);
         }
       } else {
-        update.run(nextTitle, nextDesc ?? r.meta_description, r.id);
+        update.run(nextTitle ?? r.meta_title, nextDesc ?? r.meta_description, r.id);
       }
     }
   });
