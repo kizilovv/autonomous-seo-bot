@@ -44,9 +44,13 @@ interface CurrentMetrics {
   impressions: number;
 }
 
+// RU pages live on csboard.com (the .trade property is a 301 shell holding
+// ~8% of the rows). Reading feedback from sc-domain:csboard.trade meant every
+// RU snippet change was judged against a dead property and scored
+// "insufficient data" forever — no RU rewrite has ever been graded.
 const SITE_BY_LOCALE: Record<string, string> = {
   en: "sc-domain:csboard.com",
-  ru: "sc-domain:csboard.trade",
+  ru: "sc-domain:csboard.com",
 };
 
 interface Stats {

@@ -10,7 +10,7 @@
 // We DO NOT generate proposals here; that's the generator step.
 // Each detected row becomes a row in `opportunities` with proposed_value=null.
 
-import { aggregateQueries, insertOpportunity, type OpportunityKind, getPageContent } from "../db/repo.js";
+import { aggregateQueries, insertOpportunity, type OpportunityKind, getPageContent, isPinnedField } from "../db/repo.js";
 import { gscSites } from "../config.js";
 import { logger } from "../logger.js";
 import { isPoisonedQuery } from "../quality/brand-guard.js";
@@ -185,7 +185,8 @@ export async function classifyAllSites(args: {
           r.impressions >= MIN_IMPS_BY_KIND.snippet_rewrite &&
           r.ctr < expected * 0.8 &&
           share >= MIN_QUERY_SHARE &&
-          !healthyPage(r.page)
+          !healthyPage(r.page) &&
+          !isPinnedField(lp.locale, lp.path, "description")
         ) {
           insertOpportunity({
             kind: "snippet_rewrite",
@@ -204,7 +205,8 @@ export async function classifyAllSites(args: {
 
         // ---------- rank_push (pos 4-10 striking distance) ----------
         // Skip paths where intro_extra/faq aren't rendered — wasted work.
-        if (pos >= 4 && pos <= 10 && r.impressions >= MIN_IMPS_BY_KIND.rank_push && bodyCmsRenders(lp.path)) {
+        if (pos >= 4 && pos <= 10 && r.impressions >= MIN_IMPS_BY_KIND.rank_push && bodyCmsRenders(lp.path)
+            && !isPinnedField(lp.locale, lp.path, "intro_extra")) {
           // Only push if the query is NOT already in the page's H1/intro
           const pc = getPageContent(lp.locale, lp.path);
           const hay = `${(pc.fields.h1 ?? "") as string} ${(pc.fields.intro ?? "") as string}`.toLowerCase();
@@ -228,7 +230,8 @@ export async function classifyAllSites(args: {
 
       // ---------- content_enrich (page-2 lift) ----------
       // Same guard — faq writes are ignored on /items, /blog, /weapons paths.
-      if (pos > 10 && pos <= 20 && r.impressions >= MIN_IMPS_BY_KIND.content_enrich && bodyCmsRenders(lp.path)) {
+      if (pos > 10 && pos <= 20 && r.impressions >= MIN_IMPS_BY_KIND.content_enrich && bodyCmsRenders(lp.path)
+          && !isPinnedField(lp.locale, lp.path, "faq")) {
         insertOpportunity({
           kind: "content_enrich",
           locale: lp.locale,
@@ -254,7 +257,8 @@ export async function classifyAllSites(args: {
           : 1;
         // Same reasoning as snippet_rewrite: the snippet is shared, so only a
         // query that carries the page may claim its regression.
-        if (positionDelta < 1.5 && clickDrop > 0.3 && p.clicks >= 5 && regShare >= MIN_QUERY_SHARE) {
+        if (positionDelta < 1.5 && clickDrop > 0.3 && p.clicks >= 5 && regShare >= MIN_QUERY_SHARE
+            && !isPinnedField(lp.locale, lp.path, "description")) {
           insertOpportunity({
             kind: "ctr_regression",
             locale: lp.locale,

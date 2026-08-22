@@ -126,14 +126,25 @@ export async function runDailyReport() {
       }, {});
       lines.push(`<b>👁 Pending review</b>: ${pending.length} (${Object.entries(byKind).map(([k,v])=>`${k} ${v}`).join(", ")})`);
       // Top 3 with most impact
+      // Rank by whichever demand number the kind carries: GSC opportunities
+      // have `impressions`, competitor_gap rows carry DataForSEO
+      // `search_volume`. Sorting on impressions alone pinned every gap row at 0
+      // so the paid competitor intel never once reached this digest.
+      const demandOf = (m: any): number => m.impressions ?? m.search_volume ?? 0;
       const top = pending
         .map((o: any) => ({ ...o, m: JSON.parse(o.metrics ?? "{}") }))
-        .sort((a, b) => (b.m.impressions ?? 0) - (a.m.impressions ?? 0))
-        .slice(0, 3);
+        .sort((a, b) => demandOf(b.m) - demandOf(a.m))
+        .slice(0, 6);
       for (const o of top) {
-        lines.push(
-          `  · <code>${esc(o.locale)}${esc(o.path)}</code> — "${esc(o.query ?? "")}" pos ${(o.m.position ?? 0).toFixed(1)}, ${o.m.impressions ?? 0} imps`
-        );
+        if (o.m.search_volume != null && o.m.impressions == null) {
+          lines.push(
+            `  · <b>gap</b> "${esc(o.query ?? "")}" — vol ${o.m.search_volume}/mo, ${esc(o.m.competitor ?? "?")} #${o.m.competitor_position ?? "?"} → target <code>${esc(o.m.suggested_target ?? "choose page")}</code>`
+          );
+        } else {
+          lines.push(
+            `  · <code>${esc(o.locale)}${esc(o.path)}</code> — "${esc(o.query ?? "")}" pos ${(o.m.position ?? 0).toFixed(1)}, ${o.m.impressions ?? 0} imps`
+          );
+        }
       }
       lines.push(`<i>To review pending opportunities:</i> <code>sqlite3 /srv/csboard-seo/data/seo.db 'SELECT id,kind,path,query,substr(proposed_value,1,200) FROM opportunities WHERE status=\"pending\" LIMIT 20;'</code>`);
       lines.push("");

@@ -349,13 +349,59 @@ export function insertOpportunity(opp: OpportunityRow): number {
   return Number(r.lastInsertRowid);
 }
 
+/**
+ * Kinds that have no generator and never will — they are signals for a human,
+ * not copy to write. Before 2026-08-22 the generate worker pulled them into its
+ * queue anyway, hit `throw new Error("... is not auto-generatable")`, and
+ * soft-rejected them. That silently binned 397 competitor_gap rows (500+
+ * keywords of paid DataForSEO intel, ~$0.11/day) and 105 lost_ranking alarms —
+ * every one of them within a day of being detected, before any human saw it.
+ * They now stay `pending` so the daily report can surface them.
+ */
+export const REVIEW_ONLY_KINDS = ["competitor_gap", "lost_ranking", "schema_gap"] as const;
+
 export function pendingOpportunitiesNeedingProposal(limit = 50) {
   const db = getDb();
+  const placeholders = REVIEW_ONLY_KINDS.map(() => "?").join(",");
   return db
     .prepare(
-      `SELECT * FROM opportunities WHERE status = 'pending' AND proposed_value IS NULL ORDER BY detected_at DESC LIMIT ?`
+      `SELECT * FROM opportunities
+       WHERE status = 'pending' AND proposed_value IS NULL
+         AND kind NOT IN (${placeholders})
+       ORDER BY detected_at DESC LIMIT ?`
     )
-    .all(limit) as Array<OpportunityRow & { id: number; status: string; detected_at: string }>;
+    .all(...REVIEW_ONLY_KINDS, limit) as Array<OpportunityRow & { id: number; status: string; detected_at: string }>;
+}
+
+/**
+ * True when a field was last written by a human and must not be touched by the
+ * bot. Any `source` starting with `human:` claims the field permanently — the
+ * commercial head terms (`/sell`, `/cs2-marketplace`, …) are hand-tuned for
+ * intent match, and the bot used to overwrite them within 24h chasing whatever
+ * long-tail query happened to be underperforming that morning.
+ *
+ * Release a pin by rewriting the row with a `bot:`/`auto:` source.
+ */
+export function isPinnedField(locale: string, path: string, field: string): boolean {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT source FROM content WHERE locale = ? AND path = ? AND field = ? AND active = 1 AND variant_id = ''"
+    )
+    .get(locale, path, field) as { source: string | null } | undefined;
+  return !!row?.source && row.source.startsWith("human:");
+}
+
+/** ISO timestamp of the newest applied change to this exact field, or null. */
+export function lastAppliedAtForField(locale: string, path: string, field: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT MAX(applied_at) AS t FROM opportunities
+       WHERE status = 'applied' AND locale = ? AND path = ? AND field = ? AND applied_at IS NOT NULL`
+    )
+    .get(locale, path, field) as { t: string | null } | undefined;
+  return row?.t ?? null;
 }
 
 export function pendingOpportunitiesReady(limit = 50) {

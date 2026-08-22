@@ -56,6 +56,52 @@ function slugify(s: string): string {
   return s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
 }
 
+/**
+ * Best-guess landing page for a gap keyword, so the pending row tells a human
+ * *where* to act instead of just *what* we're missing.
+ *
+ * Deliberately conservative: an unresolved keyword returns null and reads as
+ * "new page needed", which is a real answer. Weapon pages come first because
+ * that is the page type that actually wins head commercial terms — lis-skins
+ * takes "авп"/"дигл" with /ru/market/csgo/<weapon>, and our own /weapons/*
+ * equivalent sat orphaned with zero internal links until 2026-08-05.
+ */
+const WEAPON_SLUGS = [
+  "awp", "ak-47", "m4a1-s", "m4a4", "desert-eagle", "usp-s", "glock-18", "karambit",
+  "butterfly-knife", "bayonet", "m9-bayonet", "gloves", "ssg-08", "famas", "galil-ar",
+  "mac-10", "mp9", "p90", "ump-45", "five-seven", "tec-9", "cz75-auto", "p250", "r8-revolver",
+  "nova", "xm1014", "mag-7", "negev", "m249", "aug", "sg-553", "mp7", "mp5-sd", "p2000", "dual-berettas",
+];
+const WEAPON_ALIASES: Record<string, string> = {
+  "ak47": "ak-47", "ak 47": "ak-47", "deagle": "desert-eagle", "desert eagle": "desert-eagle",
+  "usp": "usp-s", "usp s": "usp-s", "glock": "glock-18", "m4a1": "m4a1-s", "m9": "m9-bayonet",
+  "butterfly": "butterfly-knife", "five seven": "five-seven", "cz75": "cz75-auto", "ssg": "ssg-08",
+  "scout": "ssg-08", "revolver": "r8-revolver", "ump": "ump-45", "mac 10": "mac-10", "mp5": "mp5-sd",
+};
+
+export function suggestTargetPage(keyword: string): string | null {
+  const k = keyword.toLowerCase().trim();
+
+  // 1) Weapon / knife / glove head terms → the weapon hub.
+  const normalised = k.replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  for (const [alias, slug] of Object.entries(WEAPON_ALIASES)) {
+    if (new RegExp(`(^|\\s)${alias}(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
+  }
+  for (const slug of WEAPON_SLUGS) {
+    const spaced = slug.replace(/-/g, " ");
+    if (new RegExp(`(^|\\s)(${slug}|${spaced})(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
+  }
+
+  // 2) Intent hubs.
+  if (/\b(sell|selling|cash\s?out|withdraw|payout)\b/.test(k)) return "/sell";
+  if (/\b(marketplace|market\s?place|shop|store|buy|buying)\b/.test(k)) return "/cs2-marketplace";
+  if (/\b(trade|trading|swap|exchange)\b/.test(k)) return "/trades";
+  if (/\b(price|prices|pricing|value|worth)\b/.test(k)) return "/cs2-skins-prices";
+  if (/\b(top\s?up|topup|top-up)\b/.test(k)) return "/steam-topup";
+
+  return null;
+}
+
 function competitorForToday(): string {
   const list = config.DATAFORSEO_COMPETITORS.split(",").map((s) => s.trim()).filter(Boolean);
   if (!list.length) throw new Error("DATAFORSEO_COMPETITORS is empty");
@@ -225,6 +271,7 @@ export async function runDataForSeoPull(opts?: { competitor?: string; refreshOwn
       if (emitted >= MAX_NEW_OPPS_PER_RUN) break;
       const intent = intents[cand.kw] || null;
       const placeholderSlug = slugify(cand.kw);
+      const suggested = suggestTargetPage(cand.kw);
       const oppId = insertOpportunity({
         kind: "competitor_gap",
         locale: "en",
@@ -241,9 +288,10 @@ export async function runDataForSeoPull(opts?: { competitor?: string; refreshOwn
           competitor: competitor,
           competitor_url: cand.row.url,
           intent,
+          suggested_target: suggested,
         },
         risk: "medium",
-        notes: `[${competitor} pos ${cand.row.position}] vol=${cand.row.search_volume} diff=${cand.row.difficulty}${intent ? ` intent=${intent}` : ""} — choose target page (existing /items/${placeholderSlug}, new hub, or listicle) then enrich content`,
+        notes: `[${competitor} pos ${cand.row.position}] vol=${cand.row.search_volume} diff=${cand.row.difficulty}${intent ? ` intent=${intent}` : ""} — ${suggested ? `strengthen ${suggested}` : "NO PAGE OWNS THIS — new hub needed"}`,
       });
       db.prepare(`UPDATE competitor_gap_keywords SET emitted = 1 WHERE id = ?`).run(cand.cacheId);
       logger.info({ oppId, kw: cand.kw, vol: cand.row.search_volume, diff: cand.row.difficulty, intent }, "competitor_gap emitted");

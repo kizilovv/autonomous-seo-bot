@@ -4,16 +4,21 @@
 // blocked + non-auto opportunities stay in the `opportunities` table; the
 // daily-report worker summarises them in the single daily Telegram digest.
 
-import { upsertContent, getPageContent, applyOpportunity, rejectOpportunity, pendingOpportunitiesReady, type OpportunityRow } from "../db/repo.js";
+import { upsertContent, getPageContent, applyOpportunity, rejectOpportunity, pendingOpportunitiesReady, isPinnedField, type OpportunityRow } from "../db/repo.js";
 import { decide } from "./risk-gate.js";
 import { logger } from "../logger.js";
 import { getDb } from "../db/connection.js";
 import { indexNowPingMulti } from "../integrations/indexnow.js";
 import { similarity } from "../quality/gate.js";
 
+// Single live host since 2026-07 — csboard.trade is a blanket 301 to
+// csboard.com (verified 2026-08-22: /ru/sell → 301 → csboard.com/ru/sell).
+// Submitting a redirecting host to IndexNow burns the ping: the key file lives
+// on csboard.com, so the .trade host never validated and every RU change went
+// unannounced to Bing/Yandex.
 const SITE_URL_FOR_LOCALE: Record<string, string> = {
   en: "https://csboard.com",
-  ru: "https://csboard.trade",
+  ru: "https://csboard.com",
 };
 
 function fullUrlFor(locale: string, path: string): string | null {
@@ -42,6 +47,13 @@ function autoCountToday(): number {
 
 async function applyAuto(opp: OpportunityRow & { id: number }): Promise<{ ok: boolean; contentId?: number; err?: string }> {
   if (!opp.field || !opp.proposed_value) return { ok: false, err: "missing field/value" };
+
+  // Human-pinned fields are off-limits. Second lock — the classifier already
+  // refuses to open opportunities against them, this catches rows detected
+  // before the pin was set.
+  if (isPinnedField(opp.locale, opp.path, opp.field)) {
+    return { ok: false, err: `field pinned by human — bot may not overwrite ${opp.locale}${opp.path}/${opp.field}` };
+  }
   let value: unknown;
   try { value = JSON.parse(opp.proposed_value); } catch { value = opp.proposed_value; }
 

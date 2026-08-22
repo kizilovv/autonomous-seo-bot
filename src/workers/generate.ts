@@ -2,7 +2,7 @@
 // Tier-1 free models first, fall back to paid; cache hits don't count toward spend.
 // Stops early if the daily budget cap is hit.
 
-import { pendingOpportunitiesNeedingProposal, setProposal, rejectOpportunity, getPageContent, type OpportunityRow } from "../db/repo.js";
+import { pendingOpportunitiesNeedingProposal, setProposal, rejectOpportunity, getPageContent, lastAppliedAtForField, type OpportunityRow } from "../db/repo.js";
 import { startRun, finishRun, failRun } from "../db/repo.js";
 import { genSnippet, genIntroExtra, genFaqItem, genRegressionFix } from "../generate/generators.js";
 import { budgetExceeded } from "../llm/openrouter.js";
@@ -21,6 +21,29 @@ interface GenerateStats {
 // Per-run cap on how many proposals to generate. Set higher than apply's
 // MAX_AUTO_CHANGES_PER_DAY so the apply worker never blocks on missing proposals.
 const PER_RUN_LIMIT = 400;
+
+/**
+ * Minimum days between two rewrites of the SAME (locale, path, field) —
+ * regardless of which query triggered them.
+ *
+ * The pre-existing cooldown compared query *intent* (60% token overlap), which
+ * near-synonyms walk straight through: "трейд кс" vs "трейд кс2" share one
+ * 3+-char token out of two, scores 0.5, passes. Result measured on 2026-08-22:
+ * ru /cs2-trading intro_extra rewritten 26 times in 21 days, en /trades faq 20
+ * times, ru / intro_extra 16 — a different long-tail every morning, each one
+ * replacing the whole field. Nothing ever survived long enough for the
+ * ctr-feedback worker (which grades at 7-21 days) to judge it, so the bot has
+ * been unable to learn from a single body edit it ever made.
+ *
+ * ctr_regression is exempt: it fires precisely because the current value broke,
+ * and making it wait would leave a known-bad snippet live.
+ */
+const FIELD_COOLDOWN_DAYS: Record<string, number> = {
+  description: 21,
+  title: 21,
+  intro_extra: 21,
+  faq: 14,
+};
 
 /** Two queries share intent if their non-stopword token bags overlap >= 60%. */
 function sameIntent(a: string | null, b: string | null): boolean {
@@ -96,6 +119,23 @@ export async function runGenerate(): Promise<GenerateStats> {
       if (recent.some((row) => sameIntent(row.query, opp.query))) {
         rejectOpportunity(opp.id, "cooldown: same field+query intent applied <7d ago");
         continue;
+      }
+
+      // Field-level cooldown — the query-intent check above only stops literal
+      // repeats; this one stops the field itself from being churned daily.
+      const coolDays = FIELD_COOLDOWN_DAYS[opp.field as string];
+      if (coolDays && opp.kind !== "ctr_regression") {
+        const last = lastAppliedAtForField(opp.locale, opp.path, opp.field as string);
+        if (last) {
+          const ageDays = (Date.now() - Date.parse(last.endsWith("Z") ? last : last + "Z")) / 86_400_000;
+          if (Number.isFinite(ageDays) && ageDays < coolDays) {
+            rejectOpportunity(
+              opp.id,
+              `field-cooldown: ${opp.path}/${opp.field} rewritten ${ageDays.toFixed(1)}d ago (<${coolDays}d) — let it settle`
+            );
+            continue;
+          }
+        }
       }
       filteredQueue.push(opp);
     }

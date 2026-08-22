@@ -22,9 +22,11 @@ interface VerifyStats {
   sitemaps?: Array<{ site: string; sitemap: string; ok: boolean; err?: string }>;
 }
 
+// csboard.trade 301s to csboard.com — fetching it to verify a RU change
+// verified the redirect, not the page.
 const SITE_URL_FOR_LOCALE: Record<string, string> = {
   en: "https://csboard.com",
-  ru: "https://csboard.trade",
+  ru: "https://csboard.com",
 };
 
 interface AppliedRow {
