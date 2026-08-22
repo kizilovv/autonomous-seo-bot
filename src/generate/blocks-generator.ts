@@ -235,13 +235,108 @@ function cutAtWord(s: string, maxLen: number): string {
   return cut.replace(/[\s:,\-–—|&?]+$/, "");
 }
 
-/** SERP-safe meta title: full title when short, word-boundary cut when long,
- *  " · CSBoard" brand suffix only when the total stays within ~65 chars. */
-function buildMetaTitle(title: string): string {
+/**
+ * Words that cannot legally END a title. A word-boundary cut is not enough on
+ * its own: "…Complete Guide to CS2's Most" and "…Factory New Contraband That"
+ * are both clean cuts at a space and both read as a broken sentence in the
+ * SERP. Measured 2026-08-22: 64% of August titles ended this way, and the
+ * worst offender (16,257 impressions, position 8.1) earned 0.22% CTR.
+ */
+const DANGLING_TAIL_RE =
+  /[\s]+(?:the|a|an|and|or|but|to|of|for|in|on|at|by|with|without|from|into|about|as|is|are|was|were|be|been|that|this|these|those|which|who|whom|whose|what|why|how|when|where|its|it's|your|our|their|his|her|my|no|not|most|more|less|best|worst|new|all|any|every|each|some|such|than|then|so|if|vs|via|only|just|still|even|really)$|[\s]+(?:и|или|но|в|во|на|за|для|при|от|до|из|по|с|со|к|ко|о|об|у|над|под|про|через|без|перед|между|после|это|этот|эта|эти|тот|та|те|как|что|чем|чтобы|же|ли|бы|не|ни|его|её|их|наш|ваш|свой|самый|более|менее|все|всё|весь|вся|уже|ещё|еще|очень|тоже|также)$|[\s]+[а-яa-z]{1,2}$/i;
+
+/** Strip every trailing word that leaves the phrase hanging, plus stray punctuation. */
+function trimDangling(s: string): string {
+  let t = s.trim().replace(/[\s:,\-–—|&?/]+$/, "");
+  // Repeat: "…Guide to CS2's Most" needs two passes ("Most", then "CS2's").
+  for (let i = 0; i < 6; i++) {
+    const next = t.replace(DANGLING_TAIL_RE, "").replace(/[\s:,\-–—|&?/]+$/, "");
+    if (next === t) break;
+    t = next;
+  }
+  return t;
+}
+
+/**
+ * SERP-safe meta title.
+ *
+ * Order matters: prefer an intact clause over a cropped one. "AWP Dragon Lore
+ * Price 2026: Complete Guide to CS2's Most Iconic Sniper Skin" cropped at a
+ * word boundary gave "…Complete Guide to CS2's Most"; cutting at the colon
+ * instead gives "AWP Dragon Lore Price 2026", which is both complete and a
+ * better match for the query that page actually ranks for ("dragon lore
+ * price", 3,359 impressions).
+ */
+export function buildMetaTitle(title: string): string {
   const t = title.trim();
   if (t.length <= 50) return `${t} · CSBoard`;
   if (t.length <= 65) return t;
-  return cutAtWord(t, 62);
+
+  // 1) Keep WHOLE clauses only. Splitting on the separators but keeping them
+  //    lets us accumulate "CSOffer Cases:" + "Are They Worth Opening in 2026?"
+  //    and stop before "Full Drop Rates Inside" would overflow — the same
+  //    whole-unit rule the description uses. A per-word dangling list can
+  //    never cover every tail ("That Nobody", "Full Drop", "без"); a clause
+  //    boundary is a fact about the string, not a guess about grammar.
+  const segments = t.match(/[^:—–|?!]+[:—–|?!]?/g)?.map((x) => x.trim()).filter(Boolean) ?? [];
+  if (segments.length > 1) {
+    let acc = "";
+    for (const seg of segments) {
+      const next = acc ? `${acc} ${seg}` : seg;
+      if (next.length > 62) break;
+      acc = next;
+    }
+    // A trailing ':' / '—' promises more text that we just dropped; '?' and
+    // '!' are legitimate endings and stay.
+    acc = acc.replace(/[\s:—–|]+$/, "").trim();
+    if (acc.length >= 12) return acc.length <= 50 ? `${acc} · CSBoard` : acc;
+  }
+
+  // 2) No usable clause boundary — crop, then drop whatever is left hanging.
+  const cropped = trimDangling(cutAtWord(t, 62));
+  if (cropped.length >= 20) return cropped.length <= 50 ? `${cropped} · CSBoard` : cropped;
+
+  // 3) Cropping ate too much (very long first word / no spaces) — keep the
+  //    full title rather than ship a stub. Google truncates visually; a long
+  //    but complete title still reads as a sentence.
+  return t;
+}
+
+/**
+ * SERP-safe meta description built from the TL;DR bullets.
+ *
+ * The bullets are statements without terminal punctuation, and joining them
+ * with a bare space welded two of them into one ungrammatical run-on:
+ * "…often including rare knives and gloves Average ROI on CSOffer cases
+ * hovers between 45-65%". Then a hard .slice(0, 220) cropped it mid-word
+ * before the word-boundary cut ever ran. 93% of August descriptions shipped
+ * this way. Now: each bullet becomes a sentence, and only WHOLE sentences are
+ * kept — a description that stops early reads finished, one that stops
+ * mid-clause reads broken.
+ */
+export function buildMetaDescription(items: string[], fallback: string, maxLen = 158): string {
+  const sentences = items
+    .map((raw) => {
+      const s = trimDangling(String(raw ?? ""));
+      if (!s) return "";
+      return /[.!?]$/.test(s) ? s : `${s}.`;
+    })
+    .filter(Boolean);
+
+  let out = "";
+  for (const s of sentences) {
+    const next = out ? `${out} ${s}` : s;
+    if (next.length > maxLen) break;
+    out = next;
+  }
+  if (out) return out;
+
+  // No whole sentence fits — crop the first one and close it properly.
+  const first = sentences[0] ?? trimDangling(fallback);
+  if (!first) return "";
+  if (first.length <= maxLen) return first;
+  const cropped = trimDangling(cutAtWord(first, maxLen - 1));
+  return cropped ? `${cropped}.` : "";
 }
 
 function countWords(blocks: BlogBlocks): number {
@@ -372,11 +467,11 @@ Write the blocks now.`;
   const title = heroBlock?.title || topic.primary_query;
   const tldrBlock = blocks.find((b) => b.type === "tldr") as { items: string[] } | undefined;
   const excerpt = tldrBlock?.items?.slice(0, 2).join(" ").slice(0, 220) || title;
-  // Meta title: never hard-cut mid-word with "…" (206 live posts shipped
-  // truncated titles like "…to CS2's Most … · CSBoard" — SERP poison).
-  // Word-boundary cut, no ellipsis; brand suffix only when it fits.
+  // Meta title: word-boundary cut is not enough — the cut must also leave a
+  // complete phrase (see buildMetaTitle). Meta description: whole sentences
+  // only, never two bullets welded together (see buildMetaDescription).
   const meta_title = buildMetaTitle(title);
-  const meta_description = excerpt.length <= 160 ? excerpt : cutAtWord(excerpt, 157);
+  const meta_description = buildMetaDescription(tldrBlock?.items ?? [], title);
 
   // Faq array for legacy `faq` column persistence
   const faqBlock = blocks.find((b) => b.type === "faq") as { items: { q: string; a: string }[] } | undefined;
