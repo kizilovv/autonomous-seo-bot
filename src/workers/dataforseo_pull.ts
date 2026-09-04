@@ -23,7 +23,7 @@
 
 import { rankedKeywords, searchIntent, BudgetCappedError, type RankedKeywordItem } from "../dataforseo/client.js";
 import { getDb } from "../db/connection.js";
-import { startRun, finishRun, failRun, insertOpportunity } from "../db/repo.js";
+import { startRun, finishRun, failRun, insertOpportunity, getPageContent } from "../db/repo.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { isPoisonedQuery } from "../quality/brand-guard.js";
@@ -56,6 +56,40 @@ function slugify(s: string): string {
   return s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
 }
 
+/** Where the public catalog answers "is this a real item?". */
+const CATALOG_API = process.env.CSBOARD_API_URL || "https://csboard.com";
+
+/**
+ * Does this keyword name an actual item we sell? Then that item's page is the
+ * target — not a category, and certainly not a hub.
+ *
+ * `awp dragon lore` (2,900/mo), `butterfly lore` (12,100), `ak-47 case hardened`
+ * (1,300) all read as weapon terms to the alias matcher below, which would file
+ * them against /items/awp or /items/butterfly-knife. But we ship a page for the
+ * exact skin, with its own listings and its own buy button, so that is where the
+ * demand belongs. Asking the catalog is exact and costs one request per NEW
+ * candidate (the loop is capped at MAX_NEW_OPPS_PER_RUN), which beats carrying a
+ * 33k-row index in the worker.
+ *
+ * Network failure returns null and the caller falls through to the category
+ * guess — never a wrong route because the API blinked.
+ */
+async function resolveItemPage(keyword: string): Promise<string | null> {
+  const slug = slugify(keyword);
+  if (!slug || slug.length < 4) return null;
+  try {
+    const res = await fetch(`${CATALOG_API}/api/items/s/${encodeURIComponent(slug)}?limit=1`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const body: any = await res.json();
+    return body?.item?.name ? `/items/${slug}` : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Best-guess landing page for a gap keyword, so the pending row tells a human
  * *where* to act instead of just *what* we're missing.
@@ -79,17 +113,37 @@ const WEAPON_ALIASES: Record<string, string> = {
   "scout": "ssg-08", "revolver": "r8-revolver", "ump": "ump-45", "mac 10": "mac-10", "mp5": "mp5-sd",
 };
 
+/**
+ * Paths whose page actually RENDERS <SeoContent>, i.e. where a CMS `intro_extra`
+ * becomes visible text. Verified against the frontend on 2026-09-04:
+ * app/[locale]/{sell,trades,(home),create-offer,comparison} are the only routes
+ * that mount it. Everywhere else the CMS feeds `generateSEOMetadata` only, so a
+ * body paragraph written for /cs2-marketplace, /weapons/ak-47 or /items/knives
+ * would be stored and never shown.
+ *
+ * This is why routing is gated on the set rather than on suggestTargetPage
+ * alone: an opportunity that cannot become visible text is worse than no
+ * opportunity, because it looks like progress on the review queue.
+ */
+const BODY_CAPABLE_PATHS = new Set<string>(["/sell", "/trades", "/", "/comparison", "/create-offer"]);
+
 export function suggestTargetPage(keyword: string): string | null {
   const k = keyword.toLowerCase().trim();
 
+  // /items/<weapon>, NOT /weapons/<weapon>. Both routes exist and both are
+  // self-canonical, but /items/ak-47 is the catalog view with live listings and
+  // a buy button, while /weapons/ak-47 is a thin hub: 23 of those pages drew
+  // 3,586 impressions and ZERO clicks in the 28 days to 2026-08-31. Sending
+  // discovered demand to a page that cannot sell was the wrong half of an
+  // otherwise correct instinct.
   // 1) Weapon / knife / glove head terms → the weapon hub.
   const normalised = k.replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
   for (const [alias, slug] of Object.entries(WEAPON_ALIASES)) {
-    if (new RegExp(`(^|\\s)${alias}(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
+    if (new RegExp(`(^|\\s)${alias}(\\s|$)`).test(normalised)) return `/items/${slug}`;
   }
   for (const slug of WEAPON_SLUGS) {
     const spaced = slug.replace(/-/g, " ");
-    if (new RegExp(`(^|\\s)(${slug}|${spaced})(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
+    if (new RegExp(`(^|\\s)(${slug}|${spaced})(\\s|$)`).test(normalised)) return `/items/${slug}`;
   }
 
   // 2) Intent hubs.
@@ -271,14 +325,28 @@ export async function runDataForSeoPull(opts?: { competitor?: string; refreshOwn
       if (emitted >= MAX_NEW_OPPS_PER_RUN) break;
       const intent = intents[cand.kw] || null;
       const placeholderSlug = slugify(cand.kw);
-      const suggested = suggestTargetPage(cand.kw);
+      // Exact item first, category second — see resolveItemPage.
+      const suggested = (await resolveItemPage(cand.kw)) ?? suggestTargetPage(cand.kw);
+      // Route the keyword onto a page that can actually answer it. Until now
+      // `suggested` only decorated metrics and the note text, while the row
+      // itself was still filed as `competitor_gap` at a path no page lives at
+      // and a kind generate.ts refuses ("is not auto-generatable"). The
+      // scoreboard that produced: 506 filed, 397 rejected, 103 expired,
+      // 2 applied. Filing it as `rank_push` against a real path hands it to
+      // genIntroExtra and the applier, with Telegram review, the budget cap,
+      // content_history and rollback all unchanged.
+      const routable = suggested !== null && BODY_CAPABLE_PATHS.has(suggested);
+      const existingIntro = routable
+        ? ((getPageContent("en", suggested as string).fields.intro as string | undefined) ?? null)
+        : null;
+
       const oppId = insertOpportunity({
-        kind: "competitor_gap",
+        kind: routable ? "rank_push" : "competitor_gap",
         locale: "en",
-        path: `/__competitor_gap/${placeholderSlug}`,
-        field: null,
+        path: routable ? (suggested as string) : `/__competitor_gap/${placeholderSlug}`,
+        field: routable ? "intro_extra" : null,
         query: cand.kw,
-        current_value: null,
+        current_value: existingIntro,
         proposed_value: null,
         metrics: {
           search_volume: cand.row.search_volume,
@@ -291,10 +359,16 @@ export async function runDataForSeoPull(opts?: { competitor?: string; refreshOwn
           suggested_target: suggested,
         },
         risk: "medium",
-        notes: `[${competitor} pos ${cand.row.position}] vol=${cand.row.search_volume} diff=${cand.row.difficulty}${intent ? ` intent=${intent}` : ""} — ${suggested ? `strengthen ${suggested}` : "NO PAGE OWNS THIS — new hub needed"}`,
+        notes: `[${competitor} pos ${cand.row.position}] vol=${cand.row.search_volume} diff=${cand.row.difficulty}${intent ? ` intent=${intent}` : ""} — ${
+          routable
+            ? `strengthen ${suggested}: write a paragraph answering this query`
+            : suggested
+              ? `${suggested} is the right page but it does not render <SeoContent>, so CMS body copy cannot show there — add the block first, or pick another target`
+              : "NO PAGE OWNS THIS — new hub needed"
+        }`,
       });
       db.prepare(`UPDATE competitor_gap_keywords SET emitted = 1 WHERE id = ?`).run(cand.cacheId);
-      logger.info({ oppId, kw: cand.kw, vol: cand.row.search_volume, diff: cand.row.difficulty, intent }, "competitor_gap emitted");
+      logger.info({ oppId, kw: cand.kw, vol: cand.row.search_volume, diff: cand.row.difficulty, intent, suggested, routable }, routable ? "competitor_gap routed to rank_push" : "competitor_gap emitted (no usable target)");
       emitted++;
     }
     result.new_opportunities = emitted;
