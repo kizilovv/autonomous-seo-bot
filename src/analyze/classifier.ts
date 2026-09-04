@@ -82,7 +82,7 @@ const MIN_QUERY_SHARE = 0.05;
  * Snippet rewrites (title/description) work everywhere — they're consumed by
  * `lib/seo.ts` `generateMetadata` which is wired into every layout.
  */
-const BODY_CMS_PATHS = [
+export const BODY_CMS_PATHS = [
   "/",          // home (home)/layout.tsx
   "/sell",
   "/trades",

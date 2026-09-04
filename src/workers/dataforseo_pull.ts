@@ -24,6 +24,7 @@
 import { rankedKeywords, searchIntent, BudgetCappedError, type RankedKeywordItem } from "../dataforseo/client.js";
 import { getDb } from "../db/connection.js";
 import { startRun, finishRun, failRun, insertOpportunity, getPageContent } from "../db/repo.js";
+import { BODY_CMS_PATHS } from "../analyze/classifier.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { isPoisonedQuery } from "../quality/brand-guard.js";
@@ -113,37 +114,31 @@ const WEAPON_ALIASES: Record<string, string> = {
   "scout": "ssg-08", "revolver": "r8-revolver", "ump": "ump-45", "mac 10": "mac-10", "mp5": "mp5-sd",
 };
 
-/**
- * Paths whose page actually RENDERS <SeoContent>, i.e. where a CMS `intro_extra`
- * becomes visible text. Verified against the frontend on 2026-09-04:
- * app/[locale]/{sell,trades,(home),create-offer,comparison} are the only routes
- * that mount it. Everywhere else the CMS feeds `generateSEOMetadata` only, so a
- * body paragraph written for /cs2-marketplace, /weapons/ak-47 or /items/knives
- * would be stored and never shown.
- *
- * This is why routing is gated on the set rather than on suggestTargetPage
- * alone: an opportunity that cannot become visible text is worse than no
- * opportunity, because it looks like progress on the review queue.
- */
-const BODY_CAPABLE_PATHS = new Set<string>(["/sell", "/trades", "/", "/comparison", "/create-offer"]);
 
 export function suggestTargetPage(keyword: string): string | null {
   const k = keyword.toLowerCase().trim();
 
-  // /items/<weapon>, NOT /weapons/<weapon>. Both routes exist and both are
-  // self-canonical, but /items/ak-47 is the catalog view with live listings and
-  // a buy button, while /weapons/ak-47 is a thin hub: 23 of those pages drew
-  // 3,586 impressions and ZERO clicks in the 28 days to 2026-08-31. Sending
-  // discovered demand to a page that cannot sell was the wrong half of an
-  // otherwise correct instinct.
+  // /weapons/<weapon>. An earlier pass sent these to /items/<weapon>, on the
+  // belief that it was the catalog view with a buy button. It is not: /items/
+  // is the ITEM route, and a bare weapon slug fuzzy-matches one arbitrary skin.
+  // /items/ak-47 renders "AK-47 | Wild Lotus from $7,212 - 1 offer" and
+  // /items/awp renders "AWP | Dragon Lore (Minimal Wear)" under
+  // robots: noindex,follow. Neither answers "ak 47 skins", and there is no
+  // weapon-level catalog route to send them to: CATEGORY_MAP holds 11 category
+  // slugs (knives, gloves, rifles, sniper-rifles, ...) and no weapon slugs.
+  //
+  // So weapon terms come back here. These pages are thin - 23 of them drew
+  // 3,586 impressions and ZERO clicks in the 28 days to 2026-08-31 - and they
+  // render no CMS body copy, so the gate below files them as placeholders for a
+  // human. That is the honest state: the demand is real and no page serves it.
   // 1) Weapon / knife / glove head terms → the weapon hub.
   const normalised = k.replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
   for (const [alias, slug] of Object.entries(WEAPON_ALIASES)) {
-    if (new RegExp(`(^|\\s)${alias}(\\s|$)`).test(normalised)) return `/items/${slug}`;
+    if (new RegExp(`(^|\\s)${alias}(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
   }
   for (const slug of WEAPON_SLUGS) {
     const spaced = slug.replace(/-/g, " ");
-    if (new RegExp(`(^|\\s)(${slug}|${spaced})(\\s|$)`).test(normalised)) return `/items/${slug}`;
+    if (new RegExp(`(^|\\s)(${slug}|${spaced})(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
   }
 
   // 2) Intent hubs.
@@ -335,7 +330,13 @@ export async function runDataForSeoPull(opts?: { competitor?: string; refreshOwn
       // 2 applied. Filing it as `rank_push` against a real path hands it to
       // genIntroExtra and the applier, with Telegram review, the budget cap,
       // content_history and rollback all unchanged.
-      const routable = suggested !== null && BODY_CAPABLE_PATHS.has(suggested);
+      // Reuse the classifier's list rather than keeping a second copy: a duplicate
+// drifted immediately — the local one was missing /cs2-trading-sites,
+// /cs2-marketplace, /cs2-skins-prices, /cs2-trading, /trends and /premium,
+// so half the routable gap keywords were filed as unroutable placeholders.
+      const routable =
+        suggested !== null &&
+        (BODY_CMS_PATHS as readonly string[]).includes(suggested);
       const existingIntro = routable
         ? ((getPageContent("en", suggested as string).fields.intro as string | undefined) ?? null)
         : null;
