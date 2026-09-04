@@ -11,7 +11,7 @@
 //   same query+page)
 //
 // Outcome buckets:
-//   improved          : new_ctr >= baseline_ctr * 1.10  (or position improved by 2+)
+//   improved          : new_ctr >= baseline_ctr * 1.10 AND +0.2pp absolute (or position improved by 2+)
 //   flat              : within ±10% of baseline
 //   rolled_back       : new_ctr <= baseline_ctr * 0.80 AND impressions stayed comparable
 //                       → revert content to the prior history value
@@ -158,8 +158,20 @@ export async function runCtrFeedback(): Promise<Stats> {
       const dropRatio = baselineCtr > 0 ? cur.ctr / baselineCtr : (cur.ctr === 0 ? 1 : 999);
       const positionDelta = (opp.baseline_position ?? 99) - cur.position; // positive = improved (lower pos number)
 
+      // A rewrite counts as an improvement only when CTR moved by a margin worth
+      // acting on: +10% relative AND at least +0.2pp absolute.
+      //
+      // The absolute floor is the whole point. The old test was
+      // `cur.ctr >= baselineCtr * 1.10`, and a page whose baseline window earned
+      // zero clicks has baselineCtr = 0 — so the right-hand side is 0 and the
+      // comparison is true for ANY current CTR, zero included. Every such field
+      // was labelled "improved" while nothing had changed: across 950 rows
+      // marked improved the MEDIAN delta was 0.000pp, with only the top decile
+      // above +7.8pp. The label carried no signal, which is why nothing
+      // downstream could use it to decide when to stop rewriting a field.
+      const MIN_ABS_CTR_GAIN = 0.002; // 0.2 percentage points
       let outcome: "improved" | "flat" | "rolled_back";
-      if (cur.ctr >= baselineCtr * 1.10 || positionDelta >= 2) {
+      if ((cur.ctr >= baselineCtr * 1.10 && deltaCtrAbs >= MIN_ABS_CTR_GAIN) || positionDelta >= 2) {
         outcome = "improved";
       } else if (dropRatio <= 0.80 && baselineCtr > 0.005) {
         outcome = "rolled_back";
