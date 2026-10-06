@@ -327,7 +327,7 @@ export async function runBlogGenerator() {
         }
 
         const readabilityIssues = blogReadabilityIssues(body_html);
-        const commercialIssue = commercialClaimViolation([draft.title, draft.meta_title, draft.meta_description, body_html, JSON.stringify(draft.faq)].join(". "));
+        const commercialIssue = commercialClaimViolation([draft.title, draft.meta_title, draft.meta_description, body_html, JSON.stringify(draft.faq)].join(". "), "editorial");
         if (commercialIssue) readabilityIssues.push(commercialIssue);
         const requiresApproval = BLOG_APPROVAL_ENABLED || readabilityIssues.length > 0;
         if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog held for readability review");

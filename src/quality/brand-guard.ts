@@ -199,3 +199,6 @@ export function findBrandViolation(text: string, path?: string | null): string |
   if (domain) return `foreign domain: "${domain}"`;
   return null;
 }
+
+/** Explicit attribution marker for neutral editorial comparisons only. */
+export function mentionsCompetitor(text: string): boolean { return COMPETITOR_RE.test(text); }

@@ -66,3 +66,18 @@ test('commercial facts distinguish money sales from deposits and nonmonetary swa
   assert.ok(commercialClaimViolation('CSBoard is operated by Transtrade.'));
   assert.equal(commercialClaimViolation('CSBoard operator is Nextrade Labs. Transtrade is a payment processor.'),null);
 });
+
+test('editorial competitor attribution and conditional Premium discount do not cause false positives', () => {
+  assert.equal(commercialClaimViolation('CSFloat sales fee is 2.5%.', 'editorial'), null);
+  assert.equal(commercialClaimViolation('Skinport sales fee is 8%.', 'editorial'), null);
+  assert.equal(commercialClaimViolation('CS.MONEY sales fee is 5%.', 'editorial'), null);
+  assert.ok(commercialClaimViolation('All marketplaces have zero trading fees.', 'editorial'));
+  assert.ok(commercialClaimViolation('Все площадки включая CSFloat продают без комиссии.', 'editorial'));
+  assert.ok(commercialClaimViolation('CSFloat charges 2.5% while CSBoard sales are commission-free.', 'editorial'));
+  assert.ok(commercialClaimViolation('P2P sales fee is 1.6%'));
+  assert.equal(commercialClaimViolation('P2P sales fee is 1.6% after an active Premium discount.'), null);
+  assert.equal(commercialClaimViolation('P2P sales have a base fee of 2% with a 20% Premium discount.'), null);
+  assert.ok(commercialClaimViolation('Premium sales have zero commission after discount.'));
+  assert.ok(commercialClaimViolation('Premium sales fee is 3% after discount.'));
+  assert.ok(commercialClaimViolation('<p>CSFloat sales fee is 2.5%</p><p>Sales are commission-free</p>', 'editorial'));
+});

@@ -144,7 +144,7 @@ const EXAMPLE = JSON.stringify({ blocks:
       { q: "What makes a Karambit Tier 2 Case Hardened pattern valuable?", a: "Pattern indexes in the Tier 2 band (roughly the top 5-15% of the 1,000 possible patterns) show 75-90% blue coverage on the most-visible faces, which the collector community ranks via CSBlueGem.com. Tier 2 trades for 3-10x less than Tier 1 but with much higher liquidity — most patterns sell within days." },
     ]},
     { type: "cta", title: "Browse Live Tier 2 Karambit Inventory",
-      subtitle: "Zero trading fees · Instant USDT payout · No KYC. Live listings on CSBoard.",
+      subtitle: "Browse current player listings on CSBoard. P2P sales have a base fee of 2%; item-for-item trades carry no monetary payment.",
       buttonText: "View Tier 2 Karambit →", buttonUrl: "/en/items/karambit-case-hardened-field-tested?tier=Tier-2", accent: "blue" },
   ]
 }, null, 2);

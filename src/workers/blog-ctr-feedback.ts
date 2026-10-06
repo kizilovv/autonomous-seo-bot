@@ -154,7 +154,7 @@ export async function runBlogCtrFeedback(): Promise<BlogCtrStats> {
         const live = db
           .prepare(`SELECT ${r.field} v FROM generated_blogs WHERE id = ?`)
           .get(r.blog_id) as { v: string | null } | undefined;
-        if (live && live.v === r.new_value && r.old_value != null && !commercialClaimViolation(r.old_value)) {
+        if (live && live.v === r.new_value && r.old_value != null && !commercialClaimViolation(r.old_value, "editorial")) {
           db.prepare(`UPDATE generated_blogs SET ${r.field} = ? WHERE id = ?`).run(
             r.old_value,
             r.blog_id
