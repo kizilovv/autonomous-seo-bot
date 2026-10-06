@@ -6,7 +6,7 @@ Active Premium discounts may reduce the effective P2P sales fee; describe the ba
 Never describe all CSBoard trading, selling or P2P transactions as zero-fee or commission-free.
 When mentioning a 0% fee, explicitly identify deposits or item-for-item exchange in the same sentence.
 Do not infer instant-sell pricing, withdrawal charges or network fees from these three rates.
-CSBoard's operator is Nextrade Labs. Transtrade is a payment processor, not the platform operator.
+CSBoard's operator is Nextrade Labs. Transtrade (also spelled Transtreid / Транстрейд) is a payment processor, not the platform operator.
 Only mention these entities when relevant; never replace an unknown legal registered name/address with a guess.
 `.trim();
 
@@ -18,9 +18,14 @@ export function commercialClaimViolation(value: string, context: "csboard" | "ed
     // Only explicit third-party attribution is exempt in neutral articles.
     // Mixed-brand, implicit and universal claims remain subject to our guard.
     if (context === "editorial" && mentionsCompetitor(clause) && !/cs\s?board|ксборд|кс\s+боард|\b(?:we|our|all|every)\b|(?:^|\s)(?:все|каждый|каждая|мы|наш[а-яё]*)(?:\s|$)/iu.test(clause)) continue;
-    const zeroFee = /(?:zero|no|0(?:[.,]0+)?\s*%|нулев[а-яё]*|без)\s*(?:[\wа-яё-]+\s+){0,3}(?:fees?|commission|комисси[а-яё]*)|(?:fee|commission|комисси[а-яё]*)[^,;]{0,20}\b0(?:[.,]0+)?\s*%|(?:fee|commission)[ -]free/iu.test(clause);
+    const explicitZeroFee = /(?:zero|no|0(?:[.,]0+)?\s*%|нулев[а-яё]*|без)\s*(?:[\wа-яё-]+\s+){0,3}(?:fees?|commission|комисси[а-яё]*)|(?:fee|commission|комисси[а-яё]*)[^,;]{0,20}\b0(?:[.,]0+)?\s*%|(?:fee|commission)[ -]free/iu.test(clause);
+    const semanticZeroFee = /(?:нет|никаких)\s+(?:[а-яё]+\s+){0,3}комисси[а-яё]*|комисси[а-яё]*(?:\s+[а-яё]+){0,5}\s+отсутству[а-яё]*|(?:eliminat\w*|remov\w*|waiv\w*)(?:\s+\w+){0,3}\s+(?:fees?|commissions?)/iu.test(clause);
+    const freeClaim = /(?:100\s*%|completely|entirely|totally)\s*free|(?:at\s+)?no\s+cost|полностью\s+бесплатн[а-яё]*/iu.test(clause);
+    const proceedsClaim = /(?:keep|retain|receive|get)\s+(?:the\s+)?(?:full\s+)?100\s*%[^.!?;]{0,30}(?:sale|proceeds|payout|revenue)|(?:получ[а-яё]*|сохран[а-яё]*)[^.!?;]{0,25}100\s*%[^.!?;]{0,25}(?:продаж|выручк)/iu.test(clause);
+    const browsingOnly = /brows(?:e|ing)|view(?:ing)?\s+(?:listings|inventory)|search(?:ing)?\s+(?:listings|inventory)|просмотр|поиск\s+(?:предмет|скин)/iu.test(clause);
     const scopedFree = /deposit|пополнени|депозит|item[ -]for[ -]item|skin[ -]for[ -]skin|предмет\s+на\s+предмет|скин\s+на\s+скин|обмен[^,;]{0,45}(?:без денег|без денежных)/iu.test(clause);
-    const sales = /(?:p2p\s+)?sales?|selling|продаж/iu.test(clause);
+    const sales = /(?:p2p\s+)?sales?|sell(?:ing)?|продаж|прода[вёе]/iu.test(clause);
+    const zeroFee = explicitZeroFee || semanticZeroFee || proceedsClaim || (freeClaim && (!browsingOnly || sales));
     if (zeroFee && sales) return 'P2P sales cost 2%; they are not zero-fee';
     if (sales && /(?:fee|commission|комисси)/iu.test(clause)) {
       const rates = [...clause.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)].map(m => Number(m[1].replace(',', '.')));
@@ -35,7 +40,7 @@ export function commercialClaimViolation(value: string, context: "csboard" | "ed
       if (unsupported) return 'P2P sales base commission is 2%; a lower effective fee requires an active Premium discount qualifier';
     }
     if (zeroFee && !scopedFree) return 'Unscoped zero-fee claim: deposits and item-for-item exchanges only; P2P sales cost 2%';
-    if (/transtrade/iu.test(clause) && /(?:operat(?:or|ed)|owned|владел|оператор|управля)/iu.test(clause) && !/(?:not|не)\s+(?:the\s+)?(?:platform\s+)?(?:operator|оператор)/iu.test(clause)) return 'Operator is Nextrade Labs; Transtrade is the payment processor';
+    if (/transtrade|transtreid|транстрейд/iu.test(clause) && /(?:operat(?:or|ed|es|ing)|own(?:ed|s)|владел|оператор|управля)/iu.test(clause) && !/(?:not|не)\s+(?:является\s+)?(?:the\s+)?(?:platform\s+)?(?:operator|оператор)/iu.test(clause)) return 'Operator is Nextrade Labs; Transtrade is the payment processor';
   }
   return null;
 }

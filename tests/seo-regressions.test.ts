@@ -81,3 +81,11 @@ test('editorial competitor attribution and conditional Premium discount do not c
   assert.ok(commercialClaimViolation('Premium sales fee is 3% after discount.'));
   assert.ok(commercialClaimViolation('<p>CSFloat sales fee is 2.5%</p><p>Sales are commission-free</p>', 'editorial'));
 });
+
+test('real-world paraphrases cannot reintroduce universal free selling or wrong operator', () => {
+  const invalid = ['CSBoard is 100% free', 'buy and sell at no cost', 'eliminate trading commissions entirely', 'keep 100% sale proceeds', 'нет комиссий', 'комиссия за сделки отсутствует', 'Никаких комиссий', 'CSBoard полностью бесплатный', 'Transtreid operates CSBoard', 'Оператор платформы Транстрейд'];
+  for (const claim of invalid) assert.ok(commercialClaimViolation(claim), claim);
+  for (const claim of ['Browsing CSBoard listings is 100% free', 'Browse the inventory at no cost', 'Просмотр предметов полностью бесплатный', 'Item-for-item exchanges have no commissions', 'Deposits have no fees', 'Transtreid is a payment processor', 'Транстрейд не является оператором платформы']) assert.equal(commercialClaimViolation(claim), null, claim);
+  assert.ok(commercialClaimViolation('Browse and sell at no cost'));
+  assert.equal(commercialClaimViolation('CSFloat lets sellers keep 100% sale proceeds', 'editorial'), null);
+});
