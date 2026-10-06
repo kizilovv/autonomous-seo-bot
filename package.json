@@ -1,7 +1,7 @@
 {
   "name": "csboard-seo-bot",
   "version": "0.1.0",
-  "description": "Autonomous SEO content service for csboard.com / csboard.trade — isolated SQLite-backed CMS with read-only HTTP API + MCP write interface",
+  "description": "Autonomous SEO content service for csboard.com / csboard.trade \u2014 isolated SQLite-backed CMS with read-only HTTP API + MCP write interface",
   "private": true,
   "type": "module",
   "engines": {
@@ -16,7 +16,8 @@
     "seed": "tsx scripts/seed-from-i18n.ts",
     "mcp": "tsx src/mcp/server.ts",
     "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "DB_PATH=:memory: GA4_PROPERTY_ID=test LOG_LEVEL=error node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@google-analytics/data": "^5.2.1",

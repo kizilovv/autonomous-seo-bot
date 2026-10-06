@@ -256,6 +256,19 @@ export function insertGa4Rows(rows: Ga4Row[]): number {
   });
 }
 
+/** Atomic complete-window replacement: retries cannot duplicate rolling totals.
+ * Legacy rows retain NULL window_start and must never be interpreted as daily data. */
+export function replaceGa4Window(property: string, since: string, until: string, rows: Ga4Row[]): number {
+  return tx((db: Database) => {
+    db.prepare("DELETE FROM ga4_snapshots WHERE property_id = ? AND snapshot_date = ? AND (window_start = ? OR window_start IS NULL)").run(property, until, since);
+    const stmt = db.prepare(`INSERT INTO ga4_snapshots
+      (property_id, snapshot_date, host, channel, landing_page, sessions, engaged, engagement_rate, window_start, window_end)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const r of rows) stmt.run(property, until, r.host, r.channel, r.landing_page, r.sessions, r.engaged, r.engagement_rate, since, until);
+    return rows.length;
+  });
+}
+
 export function latestSnapshotDate(table: "gsc_snapshots" | "ga4_snapshots"): string | null {
   const db = getDb();
   const row = db.prepare(`SELECT MAX(snapshot_date) AS d FROM ${table}`).get() as { d: string | null };

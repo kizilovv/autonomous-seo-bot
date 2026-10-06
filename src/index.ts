@@ -18,7 +18,9 @@ async function main() {
   registerCrons();
 
   // 4) Optional boot ping (silent)
-  await sendMessage("🟢 csboard-seo-bot online", { silent: true });
+  if (process.env.SEO_BOT_SILENT_START !== "1") {
+    await sendMessage("🟢 csboard-seo-bot online", { silent: true });
+  }
 
   // 5) Graceful shutdown
   const shutdown = async (sig: string) => {

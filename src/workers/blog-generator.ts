@@ -1,3 +1,4 @@
+import { blogReadabilityIssues } from "../quality/blog-readability.js";
 // Blog generator worker.
 // Two phases:
 //   A) Topic detection — group GSC queries into clusters with shared intent,
@@ -324,6 +325,9 @@ export async function runBlogGenerator() {
           body_html = `${draft.body_html}\n${htmlSection}`;
         }
 
+        const readabilityIssues = blogReadabilityIssues(body_html);
+        const requiresApproval = BLOG_APPROVAL_ENABLED || readabilityIssues.length > 0;
+        if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog held for readability review");
         const blogId = insertBlog({
           ...draft,
           body_md,
@@ -343,7 +347,7 @@ export async function runBlogGenerator() {
           // Legacy genBlogPost() drafts have no body_blocks → column stays NULL,
           // FE falls back to body_html rendering as before.
           body_blocks: "body_blocks" in draft ? (draft as BlogBlocksDraft).body_blocks : undefined,
-        }, BLOG_APPROVAL_ENABLED ? "pending_approval" : "published");
+        }, requiresApproval ? "pending_approval" : "published");
         markTopicStatus(topic.id, "generated", blogId);
         stats.blogs_generated++;
         stats.total_cost_usd += draft.cost_usd;
@@ -352,7 +356,7 @@ export async function runBlogGenerator() {
           "blog generated"
         );
         await sendMessage(
-          BLOG_APPROVAL_ENABLED
+          requiresApproval
             ? `📝 Blog PENDING APPROVAL · #${blogId}\n<b>${esc(draft.title)}</b>\n<code>${esc(topic.locale)}</code>/<code>${esc(slug)}</code>\n${draft.word_count} words · $${draft.cost_usd.toFixed(4)} · ${esc(draft.source_model)}\n✅ approve: <code>POST /v1/blog/${blogId}/approve</code> · ❌ <code>/reject</code>`
             : `📝 New blog post auto-published\n<b>${esc(draft.title)}</b>\n<code>${esc(topic.locale)}</code>/<code>${esc(slug)}</code>\n${draft.word_count} words · $${draft.cost_usd.toFixed(4)} · model ${esc(draft.source_model)}`
         );

@@ -1,31 +1,14 @@
-// CTR feedback loop — measures whether bot rewrites actually helped.
-//
-// For each opportunity that:
-//   - status = 'applied'
-//   - applied 7-21 days ago (Google has had time to recrawl + rerank)
-//   - feedback_checked_at IS NULL
-//   - has baseline_ctr / baseline_position / targeted query
-//
-// Compare:
-//   baseline (snapshot at apply moment)  vs  current (latest snapshot for the
-//   same query+page)
-//
-// Outcome buckets:
-//   improved          : new_ctr >= baseline_ctr * 1.10 AND +0.2pp absolute (or position improved by 2+)
-//   flat              : within ±10% of baseline
-//   rolled_back       : new_ctr <= baseline_ctr * 0.80 AND impressions stayed comparable
-//                       → revert content to the prior history value
-//   insufficient_data : current snapshot has <10 impressions for the query
-//
-// On rollback: find the most-recent history row for (locale, path, field)
-// PRIOR to applied_content_id, and re-upsert that value.
+// CTR feedback: exact page/query, seven complete days before apply vs days 7–13
+// after apply. Wait at least sixteen days for recrawl and GSC data finalisation.
+// Historical baseline columns remain untouched for audit but are not comparable
+// inputs. A rollback also requires sufficient volume and unchanged bot-owned content.
 
 import { getDb } from "../db/connection.js";
 import { startRun, finishRun, failRun } from "../db/repo.js";
-import { upsertContent } from "../db/repo.js";
+import { upsertContent, isPinnedField } from "../db/repo.js";
 import { logger } from "../logger.js";
 
-interface CandidateRow {
+export interface CandidateRow {
   id: number;
   locale: string;
   path: string;
@@ -36,6 +19,7 @@ interface CandidateRow {
   baseline_ctr: number | null;
   baseline_position: number | null;
   baseline_impressions: number | null;
+  proposed_value: string;
 }
 
 interface CurrentMetrics {
@@ -68,40 +52,47 @@ function fetchCandidates(): CandidateRow[] {
   return db
     .prepare(
       `SELECT id, locale, path, field, query, applied_at, applied_content_id,
-              baseline_ctr, baseline_position, baseline_impressions
+              baseline_ctr, baseline_position, baseline_impressions, proposed_value
        FROM opportunities
        WHERE status='applied'
          AND feedback_checked_at IS NULL
          AND query IS NOT NULL
          AND baseline_ctr IS NOT NULL
-         AND applied_at <= datetime('now','-7 days')
-         AND applied_at >= datetime('now','-21 days')
+         AND applied_at <= datetime('now','-16 days')
+         AND applied_at >= datetime('now','-45 days')
        ORDER BY applied_at ASC
        LIMIT 200`
     )
     .all() as CandidateRow[];
 }
 
-function currentMetricsFor(site: string, query: string): CurrentMetrics | null {
+/** Equal seven-day windows for the exact page and query; skip a seven-day
+ * recrawl interval. Never compare a query's traffic on unrelated pages. */
+export function comparableMetrics(opp: CandidateRow, site: string): { before: CurrentMetrics; after: CurrentMetrics } | null {
   const db = getDb();
-  // Use most-recent snapshot (today's pull). Sum across pages because GSC may
-  // have multiple page rows for the same query.
-  const r = db
-    .prepare(
-      `SELECT
-         CASE WHEN SUM(impressions) > 0 THEN CAST(SUM(clicks) AS REAL)/SUM(impressions) ELSE 0 END AS ctr,
-         CASE WHEN SUM(impressions) > 0 THEN SUM(position * impressions)/SUM(impressions) ELSE 0 END AS position,
-         SUM(impressions) AS impressions
-       FROM gsc_snapshots
-       WHERE site = ? AND query = ? AND snapshot_date = (SELECT MAX(snapshot_date) FROM gsc_snapshots)`
-    )
-    .get(site, query) as { ctr: number; position: number; impressions: number };
-  if (!r || !r.impressions) return null;
-  return r;
+  const day = opp.applied_at.slice(0, 10);
+  const offset = (n: number) => new Date(Date.parse(day + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const page = `https://csboard.com/${opp.locale}${opp.path === "/" ? "" : opp.path}`;
+  const read = (start: string, end: string): CurrentMetrics | null => {
+    const coverage = db.prepare("SELECT COUNT(DISTINCT snapshot_date) n FROM gsc_snapshots WHERE site = ? AND snapshot_date BETWEEN ? AND ?").get(site, start, end) as { n: number };
+    if (coverage.n !== 7) return null;
+    const r = db.prepare(`SELECT CAST(SUM(clicks) AS REAL)/SUM(impressions) ctr,
+      SUM(position * impressions)/SUM(impressions) position, SUM(impressions) impressions
+      FROM gsc_snapshots WHERE site = ? AND query = ? AND page = ? AND snapshot_date BETWEEN ? AND ?`)
+      .get(site, opp.query, page, start, end) as CurrentMetrics;
+    return r?.impressions ? r : null;
+  };
+  const before = read(offset(-7), offset(-1));
+  const after = read(offset(7), offset(13));
+  return before && after ? { before, after } : null;
 }
 
-function rollbackTo(opp: CandidateRow): { ok: boolean; history_id?: number; reason?: string } {
+export function rollbackTo(opp: CandidateRow): { ok: boolean; history_id?: number; reason?: string } {
   const db = getDb();
+  if (!opp.field || isPinnedField(opp.locale, opp.path, opp.field)) return { ok: false, reason: "field pinned or missing" };
+  const current = db.prepare("SELECT value, source FROM content WHERE id = ?").get(opp.applied_content_id) as { value: string; source: string } | undefined;
+  const newer = db.prepare("SELECT id FROM opportunities WHERE applied_content_id = ? AND status = 'applied' AND id != ? AND applied_at >= ? LIMIT 1").get(opp.applied_content_id, opp.id, opp.applied_at);
+  if (!current || current.source !== "bot:auto" || current.value !== opp.proposed_value || newer) return { ok: false, reason: "content changed since this opportunity" };
   // Find the history entry that immediately preceded the applied content row.
   // content_history_on_update fires AFTER UPDATE, storing the OLD value.
   // So the most recent history row for this content_id contains the value
@@ -143,8 +134,9 @@ export async function runCtrFeedback(): Promise<Stats> {
       const site = SITE_BY_LOCALE[opp.locale];
       if (!site || !opp.query) continue;
 
-      const cur = currentMetricsFor(site, opp.query);
-      if (!cur || cur.impressions < 10) {
+      const comparison = comparableMetrics(opp, site);
+      const cur = comparison?.after;
+      if (!cur || !comparison || cur.impressions < 100 || comparison.before.impressions < 100) {
         db.prepare(
           "UPDATE opportunities SET feedback_checked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), feedback_outcome = 'insufficient_data' WHERE id = ?"
         ).run(opp.id);
@@ -152,11 +144,11 @@ export async function runCtrFeedback(): Promise<Stats> {
         continue;
       }
 
-      const baselineCtr = opp.baseline_ctr ?? 0;
+      const baselineCtr = comparison.before.ctr;
       const deltaCtrAbs = cur.ctr - baselineCtr;
       // Define "rolled back" only if drop is real (not noise) and we had non-zero baseline.
       const dropRatio = baselineCtr > 0 ? cur.ctr / baselineCtr : (cur.ctr === 0 ? 1 : 999);
-      const positionDelta = (opp.baseline_position ?? 99) - cur.position; // positive = improved (lower pos number)
+      const positionDelta = comparison.before.position - cur.position; // positive = improved (lower pos number)
 
       // A rewrite counts as an improvement only when CTR moved by a margin worth
       // acting on: +10% relative AND at least +0.2pp absolute.
@@ -170,10 +162,10 @@ export async function runCtrFeedback(): Promise<Stats> {
       // above +7.8pp. The label carried no signal, which is why nothing
       // downstream could use it to decide when to stop rewriting a field.
       const MIN_ABS_CTR_GAIN = 0.002; // 0.2 percentage points
-      let outcome: "improved" | "flat" | "rolled_back";
+      let outcome: "improved" | "flat" | "rolled_back" | "rollback_skipped";
       if ((cur.ctr >= baselineCtr * 1.10 && deltaCtrAbs >= MIN_ABS_CTR_GAIN) || positionDelta >= 2) {
         outcome = "improved";
-      } else if (dropRatio <= 0.80 && baselineCtr > 0.005) {
+      } else if (dropRatio <= 0.80 && baselineCtr > 0.005 && baselineCtr * comparison.before.impressions >= 20 && cur.impressions >= comparison.before.impressions * 0.5 && cur.impressions <= comparison.before.impressions * 2) {
         outcome = "rolled_back";
       } else {
         outcome = "flat";
@@ -189,8 +181,9 @@ export async function runCtrFeedback(): Promise<Stats> {
           extra = ` → reverted to history #${r.history_id}`;
           stats.rolled_back++;
         } else {
+          outcome = "rollback_skipped";
           stats.errors++;
-          extra = ` (rollback failed: ${r.reason})`;
+          extra = ` (rollback skipped: ${r.reason})`;
         }
       } else if (outcome === "improved") {
         stats.improved++;

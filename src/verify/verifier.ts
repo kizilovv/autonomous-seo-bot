@@ -1,3 +1,4 @@
+import { renderedContains } from "./rendered-text.js";
 // Phase 4 — verify recently applied changes.
 //
 // Cheap & data-bound checks (no Lighthouse for now, that's heavier):
@@ -10,7 +11,7 @@ import { getDb } from "../db/connection.js";
 import { logger } from "../logger.js";
 import { sendMessage, esc } from "../notify/telegram.js";
 import { gscSites } from "../config.js";
-import { inspectUrl, submitSitemap } from "../google/gsc.js";
+import { inspectUrl } from "../google/gsc.js";
 
 interface VerifyStats {
   checked: number;
@@ -57,7 +58,7 @@ async function pageContains(url: string, needle: string): Promise<{ ok: boolean;
     const res = await fetch(url, { headers: { "User-Agent": "csboard-seo-bot/0.1" }, signal: AbortSignal.timeout(15_000) });
     if (!res.ok && res.status >= 400) return { ok: false, status: res.status };
     const html = await res.text();
-    const found = html.toLowerCase().includes(needle.toLowerCase());
+    const found = renderedContains(html, needle);
     return { ok: found, status: res.status };
   } catch (e) {
     logger.warn({ url, err: (e as Error).message }, "verify fetch failed");
@@ -121,22 +122,9 @@ export async function runVerify(): Promise<VerifyStats> {
     }
   }
 
-  // Submit sitemaps to GSC daily — pings Google to recrawl listed URLs.
-  // Idempotent, free, and the only public way to nudge Google's crawler now
-  // that the Indexing API is restricted to JobPosting/BroadcastEvent.
-  const sitemaps: Array<{ site: string; sitemap: string; ok: boolean; err?: string }> = [];
-  for (const site of sites) {
-    const host = site.replace(/^sc-domain:/, "");
-    const sitemapUrl = `https://${host}/sitemap.xml`;
-    try {
-      await submitSitemap(site, sitemapUrl);
-      sitemaps.push({ site, sitemap: sitemapUrl, ok: true });
-      logger.info({ site, sitemapUrl }, "sitemap submitted");
-    } catch (e) {
-      sitemaps.push({ site, sitemap: sitemapUrl, ok: false, err: (e as Error).message });
-      logger.warn({ site, err: (e as Error).message }, "sitemap submit failed");
-    }
-  }
+  // This client's OAuth scope is webmasters.readonly. Repeated submission
+  // cannot succeed; existing sitemap discovery remains in robots.txt / GSC.
+  const sitemaps: NonNullable<VerifyStats["sitemaps"]> = [];
 
   if (stats.checked > 0 || sitemaps.length) {
     const sitemapLine = sitemaps.length
