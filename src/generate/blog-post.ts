@@ -1,3 +1,4 @@
+import { COMMERCIAL_FACTS } from "../quality/commercial-facts.js";
 // Full blog-post generator. Targets: 1200-1800 words, structured Markdown body,
 // dedicated meta tags + FAQ. Outputs a JSON envelope so we can persist + render.
 //
@@ -35,7 +36,7 @@ CSBoard (csboard.com / csboard.trade) — P2P CS2 skin marketplace. Hard facts:
 • Instant USDT payouts (TRC20 / BEP20 / Solana / TON)
 • P2P trades direct between players (no bot middlemen)
 • ~36,000 skins indexed, prices anchored to Buff163
-• Zero trading fees, zero commission
+${COMMERCIAL_FACTS}
 • Trades execute via Steam's official trade system
 DO NOT invent features. Only mention CSBoard where it provides genuine value to the reader (1-3 mentions across the whole post; never spam).
 

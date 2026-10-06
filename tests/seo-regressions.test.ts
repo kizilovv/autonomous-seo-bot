@@ -58,3 +58,11 @@ test('GA4 fetches tail after 5,000 rows and never replaces a snapshot on partial
   assert.equal((getDb().prepare("SELECT COUNT(*) n FROM ga4_snapshots WHERE window_start='2026-10-01'").get() as {n:number}).n,5001);
   closeDb();
 });
+
+import { commercialClaimViolation } from '../src/quality/commercial-facts.js';
+test('commercial facts distinguish money sales from deposits and nonmonetary swaps', () => {
+  for (const claim of ['Zero trading fees', 'P2P sales with zero commission', 'Продажа скинов без комиссии', 'Торговая комиссия 0%', 'Commission-free P2P trades', 'Нулевая комиссия', 'Zero-Fee Marketplace', 'P2P sales commission is 1%', 'Комиссия за продажу 0,0%']) assert.ok(commercialClaimViolation(claim), claim);
+  for (const claim of ['Deposits have 0% fees.', 'P2P sales commission is 2%.', 'Item-for-item trades have zero fees.', 'Пополнение без комиссии.', 'Обмен скин на скин без комиссии.']) assert.equal(commercialClaimViolation(claim), null, claim);
+  assert.ok(commercialClaimViolation('CSBoard is operated by Transtrade.'));
+  assert.equal(commercialClaimViolation('CSBoard operator is Nextrade Labs. Transtrade is a payment processor.'),null);
+});

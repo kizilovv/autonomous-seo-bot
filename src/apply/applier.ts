@@ -1,3 +1,4 @@
+import { commercialClaimViolation } from "../quality/commercial-facts.js";
 // Auto-applier — writes approved opportunities to the SEO content table.
 // All low-risk kinds auto-apply now (snippet_rewrite, ctr_regression, rank_push, content_enrich).
 // content_enrich does an APPEND to the existing FAQ array, not a replace.
@@ -47,6 +48,9 @@ function autoCountToday(): number {
 
 async function applyAuto(opp: OpportunityRow & { id: number }): Promise<{ ok: boolean; contentId?: number; err?: string }> {
   if (!opp.field || !opp.proposed_value) return { ok: false, err: "missing field/value" };
+
+  const commercial = commercialClaimViolation(opp.proposed_value);
+  if (commercial) return { ok: false, err: commercial };
 
   // Human-pinned fields are off-limits. Second lock — the classifier already
   // refuses to open opportunities against them, this catches rows detected

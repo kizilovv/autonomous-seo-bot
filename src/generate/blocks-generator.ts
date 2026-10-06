@@ -1,3 +1,4 @@
+import { COMMERCIAL_FACTS } from "../quality/commercial-facts.js";
 // Structured blocks generator — produces validated BlogBlock[] in one LLM
 // call. Replaces the body_md/body_html flow when SEO_BOT_BLOG_BLOCKS_FORMAT=on.
 //
@@ -27,7 +28,7 @@ Hard facts only:
   - Instant USDT payouts (TRC20 / BEP20 / Solana / TON)
   - P2P trades direct between players (no bot middlemen on P2P trades)
   - ~36,000 skins indexed, prices anchored to Buff163
-  - Zero trading fees, zero commission on P2P
+${COMMERCIAL_FACTS}
   - Trades execute via Steam's official trade system
   - Tier filter URL: /<locale>/items/<slug>?tier=Tier-2
 DO NOT invent features. Mention CSBoard 1-3 times across the whole post.

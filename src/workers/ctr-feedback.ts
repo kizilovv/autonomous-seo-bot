@@ -1,3 +1,4 @@
+import { commercialClaimViolation } from "../quality/commercial-facts.js";
 // CTR feedback: exact page/query, seven complete days before apply vs days 7–13
 // after apply. Wait at least sixteen days for recrawl and GSC data finalisation.
 // Historical baseline columns remain untouched for audit but are not comparable
@@ -110,6 +111,8 @@ export function rollbackTo(opp: CandidateRow): { ok: boolean; history_id?: numbe
   let value: unknown;
   try { value = JSON.parse(prior.value); } catch { value = prior.value; }
   const finalValue = typeof value === "string" ? value : JSON.stringify(value);
+  const commercial = commercialClaimViolation(finalValue);
+  if (commercial) return { ok: false, reason: commercial };
   upsertContent({
     locale: opp.locale,
     path: opp.path,

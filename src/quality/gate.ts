@@ -1,3 +1,4 @@
+import { commercialClaimViolation } from "./commercial-facts.js";
 // Quality gate — runs on every LLM proposal BEFORE it gets persisted.
 // Rejects AI-slop, off-topic outputs, and barely-changed rewrites.
 
@@ -143,6 +144,9 @@ export function runGate(input: GateInput): GateResult {
 
   if (!text || !text.trim()) return { ok: false, reason: "empty proposal" };
 
+  const commercial = commercialClaimViolation(text);
+  if (commercial) return { ok: false, reason: commercial };
+
   // 1) Length cap
   const cap = FIELD_MAX_CHARS[field];
   if (cap && text.length > cap) {
@@ -191,6 +195,8 @@ export function runGate(input: GateInput): GateResult {
  * FAQ-specific gate (different shape — array of {q,a}).
  */
 export function runGateForFaqItem(item: { q: string; a: string }, query: string | null, locale: "en" | "ru", path?: string | null): GateResult {
+  const commercial = commercialClaimViolation(item.q + " " + item.a);
+  if (commercial) return { ok: false, reason: commercial };
   if (!item.q || item.q.length < 12) return { ok: false, reason: "FAQ q too short" };
   if (item.q.length > 150) return { ok: false, reason: `FAQ q too long: ${item.q.length} chars` };
   if (!item.a || item.a.length < 60) return { ok: false, reason: "FAQ a too short" };

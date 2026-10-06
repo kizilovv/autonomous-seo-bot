@@ -1,9 +1,10 @@
+import { COMMERCIAL_FACTS } from "../quality/commercial-facts.js";
 // Proposal generators. One function per opportunity kind. All call OpenRouter with
 // tight prompts and return strings ready to write into `content.value` (after JSON encode).
 //
 // Constraints baked into prompts (anti "обоссанные лендинги"):
 //   - Match brand voice: terse, gamer-leaning, no marketing fluff
-//   - Mention real CSBoard facts (instant USDT, P2P, 36k+ skins, zero fees) only where true
+//   - Mention real CSBoard facts (instant USDT, P2P, scoped transaction fees) only where true
 //   - Must answer query intent specifically — no generic platitudes
 //   - Cyrillic for ru locale, English for en
 
@@ -16,7 +17,7 @@ Hard facts you can reference:
 - Instant USDT payouts via TRC20, BEP20, Solana, TON
 - P2P trading directly with real players (no bots in the middle)
 - ~36,000 skins listed, prices powered by Buff163
-- Zero trading fees / zero commission
+${COMMERCIAL_FACTS}
 - Trades happen through Steam's official trading system (safe)
 DO NOT invent features. DO NOT use generic SEO-spam phrases ("welcome to the world of...", "in today's market...").
 NEVER name any other site, marketplace, brand or API — not even one that appears in the
@@ -87,7 +88,7 @@ Task: write ONE tight paragraph (90-140 words, ≤900 chars) that genuinely answ
 Goals:
 - The query phrase MUST appear in the first sentence, in natural sentence flow.
 - Include 2-4 specific facts: prices, float values, market behavior, real CS2 mechanics, comparisons.
-- Tie at least one paragraph to a CSBoard hard fact (instant USDT, P2P, zero fees, ~36k skins).
+- Tie at least one paragraph to a CSBoard hard fact (P2P, 0% deposits, 2% P2P sales, or 0% item-for-item exchanges).
 - ${isRu ? "Russian, professional but conversational. Use real CS2 slang where natural (BS/MW/FT/FN/StatTrak™/scoped trade)." : "English, professional but conversational. Use real CS2 slang where natural (BS/MW/FT/FN, StatTrak™)."}
 - Specific concrete details > generic statements. NO SEO clichés ("in today's market", "discover the world of", "elevate your game").
 - Plain text only. No markdown headings, no bullet lists, no quotes around the output, no labels.`;
