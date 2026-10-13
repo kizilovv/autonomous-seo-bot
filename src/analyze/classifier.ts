@@ -1,3 +1,4 @@
+import { cmsWriteBlockReason } from "../quality/cms-surface.js";
 // Classifier — turns GSC snapshots into actionable opportunities.
 //
 // Five kinds it detects (Phase 2):
@@ -79,7 +80,7 @@ const MIN_QUERY_SHARE = 0.05;
  * Sources: cs2-tradeboard-frontend audit 2026-05-13 — only layouts that
  * import `@/components/seo/SeoContent` are eligible.
  *
- * Snippet rewrites (title/description) work everywhere — they're consumed by
+ * Item snippet rewrites are excluded by cmsWriteBlockReason. Other snippets — they're consumed by
  * `lib/seo.ts` `generateMetadata` which is wired into every layout.
  */
 export const BODY_CMS_PATHS = [
@@ -182,6 +183,7 @@ export async function classifyAllSites(args: {
         // and a page already earning its position is left alone entirely.
         const share = pageImps > 0 ? r.impressions / pageImps : 1;
         if (
+          !cmsWriteBlockReason(lp.path, "description") &&
           r.impressions >= MIN_IMPS_BY_KIND.snippet_rewrite &&
           r.ctr < expected * 0.8 &&
           share >= MIN_QUERY_SHARE &&
@@ -257,7 +259,7 @@ export async function classifyAllSites(args: {
           : 1;
         // Same reasoning as snippet_rewrite: the snippet is shared, so only a
         // query that carries the page may claim its regression.
-        if (positionDelta < 1.5 && clickDrop > 0.3 && p.clicks >= 5 && regShare >= MIN_QUERY_SHARE
+        if (!cmsWriteBlockReason(lp.path, "description") && positionDelta < 1.5 && clickDrop > 0.3 && p.clicks >= 5 && regShare >= MIN_QUERY_SHARE
             && !isPinnedField(lp.locale, lp.path, "description")) {
           insertOpportunity({
             kind: "ctr_regression",

@@ -1,3 +1,4 @@
+import { cmsWriteBlockReason } from "../quality/cms-surface.js";
 import { commercialClaimViolation } from "../quality/commercial-facts.js";
 // Auto-applier — writes approved opportunities to the SEO content table.
 // All low-risk kinds auto-apply now (snippet_rewrite, ctr_regression, rank_push, content_enrich).
@@ -136,6 +137,13 @@ export async function runApply(_perBatch = 30): Promise<ApplyStats> {
 
     for (const opp of pending) {
       try {
+        const surfaceBlock = cmsWriteBlockReason(opp.path, opp.field);
+        if (surfaceBlock) {
+          stats.blocked++;
+          rejectOpportunity(opp.id, surfaceBlock);
+          stats.details.push(`⛔ #${opp.id} ${surfaceBlock}`);
+          continue;
+        }
         const todayAuto = autoCountToday();
         const gate = decide(opp, todayAuto);
         if (gate.decision === "auto") {

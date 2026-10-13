@@ -89,3 +89,26 @@ test('real-world paraphrases cannot reintroduce universal free selling or wrong 
   assert.ok(commercialClaimViolation('Browse and sell at no cost'));
   assert.equal(commercialClaimViolation('CSFloat lets sellers keep 100% sale proceeds', 'editorial'), null);
 });
+
+import { cmsWriteBlockReason } from '../src/quality/cms-surface.js';
+import { insertOpportunity } from '../src/db/repo.js';
+import { runApply } from '../src/apply/applier.js';
+test('item snippet proposals are blocked before CMS writes, including old queued proposals', async () => {
+  for (const path of ['/items/m4a4-buzz-kill-minimal-wear','/items/sticker-boner-snap/']) {
+    assert.ok(cmsWriteBlockReason(path,'description'));
+    assert.ok(cmsWriteBlockReason(path,'title'));
+    assert.equal(cmsWriteBlockReason(path,null),null);
+  }
+  for (const path of ['/sell','/blog/example','/items','/items-guide']) assert.equal(cmsWriteBlockReason(path,'description'),null);
+  runMigrations();
+  const db=getDb();
+  db.prepare('DELETE FROM opportunities').run();
+  db.prepare('DELETE FROM content').run();
+  const id=insertOpportunity({kind:'snippet_rewrite',locale:'en',path:'/items/m4a4-buzz-kill-minimal-wear',field:'description',query:'m4a4 buzz kill',current_value:null,proposed_value:JSON.stringify('A queued item description that cannot render.'),metrics:{impressions:200,ctr:.01,position:5},risk:'low'});
+  const result=await runApply();
+  assert.equal(result.auto_applied,0);
+  assert.equal(result.blocked,1);
+  assert.equal((db.prepare('SELECT count(*) n FROM content').get() as {n:number}).n,0);
+  assert.equal((db.prepare('SELECT status FROM opportunities WHERE id=?').get(id) as {status:string}).status,'rejected');
+  closeDb();
+});
