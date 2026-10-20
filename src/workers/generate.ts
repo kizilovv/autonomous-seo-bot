@@ -155,6 +155,9 @@ export async function runGenerate(): Promise<GenerateStats> {
       }
       try {
         const result = await generateOne(opp);
+        // A rejected proposal still incurred generation cost. Account before
+        // quality gates so worker reports include both accepted and rejected work.
+        stats.total_cost_usd += result.llm.cost_usd;
         const value = result.value;
 
         // Pull current CMS value for similarity check.
@@ -196,7 +199,6 @@ export async function runGenerate(): Promise<GenerateStats> {
         setProposal(opp.id, encoded);
         if (result.llm.cached) stats.cached++;
         stats.generated++;
-        stats.total_cost_usd += result.llm.cost_usd;
       } catch (e) {
         stats.failed++;
         logger.warn({ id: opp.id, kind: opp.kind, err: (e as Error).message }, "generator failed");
