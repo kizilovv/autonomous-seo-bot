@@ -4,7 +4,7 @@ import { COMMERCIAL_FACTS } from "../quality/commercial-facts.js";
 //
 // Constraints baked into prompts (anti "обоссанные лендинги"):
 //   - Match brand voice: terse, gamer-leaning, no marketing fluff
-//   - Mention real CSBoard facts (instant USDT, P2P, scoped transaction fees) only where true
+//   - Mention current, scoped CSBoard facts only where true
 //   - Must answer query intent specifically — no generic platitudes
 //   - Cyrillic for ru locale, English for en
 
@@ -14,11 +14,11 @@ import type { OpportunityRow } from "../db/repo.js";
 const BRAND_FACTS = `
 CSBoard (csboard.com / csboard.trade) is a P2P marketplace for CS2 (Counter-Strike 2) skin trading.
 Hard facts you can reference:
-- Instant USDT payouts via TRC20, BEP20, Solana, TON
+- Skin sales, available payout methods and payout timing are separate conditions; do not invent current methods or network support.
 - P2P trading directly with real players (no bots in the middle)
-- ~36,000 skins listed, prices powered by Buff163
+- Inventory, listing counts and prices change. Use only current page/API data; omit numbers when none is supplied.
 ${COMMERCIAL_FACTS}
-- Trades happen through Steam's official trading system (safe)
+- Item transfers use Steam's trading system; users must check the recipient and items before confirming.
 DO NOT invent features. DO NOT use generic SEO-spam phrases ("welcome to the world of...", "in today's market...").
 NEVER name any other site, marketplace, brand or API — not even one that appears in the
 search query. Queries often carry a rival's name ("... playbattlesquare", "api.lis-skins.com/v1"):
@@ -57,7 +57,7 @@ Hard rules:
 - ${isRu ? "Output in Russian (Cyrillic), match Russian search intent." : "Output in English."}
 - One line. NO quotes, NO labels, just the ${target} text itself.
 - End title with " — CSBoard" if length permits.
-- Speak directly: "Sell skins for USDT in seconds" not "Welcome to our marketplace".`;
+- Speak directly: "Check your skin sale quote" rather than generic welcome text. Do not promise an execution or payout time.`;
 
   const user = `Search query the page ranks for: ${opp.query}
 Page path: ${opp.path}
