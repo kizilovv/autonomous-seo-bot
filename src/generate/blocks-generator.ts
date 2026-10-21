@@ -25,9 +25,9 @@ import { resolveImage } from "./image-resolver.js";
 const BRAND_FACTS = `
 CSBoard (csboard.com / csboard.trade) — P2P CS2 skin marketplace.
 Hard facts only:
-  - Instant USDT payouts (TRC20 / BEP20 / Solana / TON)
+  - Available payout methods and timing depend on the transaction; do not invent current methods or network support
   - P2P trades direct between players (no bot middlemen on P2P trades)
-  - ~36,000 skins indexed, prices anchored to Buff163
+  - Inventory, listing counts and prices change; use current supplied data or omit numbers
 ${COMMERCIAL_FACTS}
   - Trades execute via Steam's official trade system
   - Tier filter URL: /<locale>/items/<slug>?tier=Tier-2
