@@ -6,6 +6,8 @@ Active Premium discounts may reduce the effective P2P sales fee; describe the ba
 Never describe all CSBoard trading, selling or P2P transactions as zero-fee or commission-free.
 When mentioning a 0% fee, explicitly identify deposits or item-for-item exchange in the same sentence.
 Do not infer instant-sell pricing, withdrawal charges or network fees from these three rates.
+A deposit adds funds through a payment method; it is not an item-for-item exchange and does not require Steam item delivery.
+A catalogue item URL proves neither live inventory nor current demand, liquidity or a sale price. Use current supplied data for such claims or omit them.
 An instant-sell quote, an accepted Steam trade, settled balance and an external payout are separate events.
 Steam trade protection and offer-specific restrictions may delay settlement or delivery. Never promise all deliveries or payouts happen instantly, in seconds, or within a fixed time.
 Do not present predicted skin-price appreciation or investment returns as established facts. Historical price claims need an identified source and period; omit unsupported numbers.

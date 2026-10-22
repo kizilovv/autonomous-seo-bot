@@ -58,7 +58,7 @@ and their fields (every field marked "required" must be present):
    { "type": "text", "html": string (1-3 paragraphs with <p>...</p>, optional
      <h2> / <h3> / <strong> / <a href="..."> / <ul> / <li> / <em>) }
 
-4. top_list  (perfect for "Top N best X", listicle SEO bait)
+4. top_list  (optional; only for a sourced ranking relevant to the query)
    { "type": "top_list", "title": string (required, e.g. "Top 7 Most Valuable
      Case Hardened Patterns"),
      "items": [ { "rank": int (1-10), "name": string (required),
@@ -81,8 +81,8 @@ and their fields (every field marked "required" must be present):
      "rows": string[][] (each inner array == one row, cells may include
                          inline <strong> tags) }
 
-7. item_grid  (showcase CSBoard inventory with thumbnails — only use when
-                you can name 4-8 real CS2 items that are likely on csboard)
+7. item_grid  (optional catalogue examples with verified URLs; a catalogue
+                entry does not prove current stock, demand or liquidity)
    { "type": "item_grid", "title": string (optional),
      "items": [ { "name": string (e.g. "Karambit"),
                   "stat": string (optional, e.g. "Tier 2"),
@@ -123,31 +123,32 @@ OUTPUT SHAPE:
 - No markdown fences. No prose around the object. JUST the JSON object.
 `.trim();
 
-const EXAMPLE = JSON.stringify({ blocks:
-  [
-    { type: "hero", title: "CS2 Karambit Tier 2 Blue Gem Patterns: 2026 Pricing Guide",
-      eyebrow: "2026 Update · Pattern Guide" },
-    { type: "tldr", items: [
-      "Tier 2 = next ~150 patterns after the elite Tier 1, with 75-90% blue coverage",
-      "Karambit Tier 2 Case Hardened trades for $3,000-$15,000 in Field-Tested float range",
-      "CSBoard lists live Tier 2 inventory at /en/items/karambit-case-hardened-field-tested?tier=Tier-2",
-      "Tier 2 carries similar appreciation as Tier 1 (15-30% per year) with much higher liquidity",
-    ]},
-    { type: "callout", style: "pro_tip",
-      text: "Since the CS2 2024 update you can read the pattern index natively in Steam's inspect screen — no third-party float-checker needed before buying." },
-    { type: "top_list", title: "Top 5 Tier 2 Karambit Patterns Worth Hunting",
-      items: [
-        { rank: 1, name: "Pattern #555", stat: "$8,500", note: "Strong even-blue coverage, no yellow lane on the front face.",
-          image_key: "karambit-case-hardened", url: "/en/items/karambit-case-hardened-field-tested?tier=Tier-2" },
-      ]},
-    { type: "faq", items: [
-      { q: "What makes a Karambit Tier 2 Case Hardened pattern valuable?", a: "Pattern indexes in the Tier 2 band (roughly the top 5-15% of the 1,000 possible patterns) show 75-90% blue coverage on the most-visible faces, which the collector community ranks via CSBlueGem.com. Tier 2 trades for 3-10x less than Tier 1 but with much higher liquidity — most patterns sell within days." },
-    ]},
-    { type: "cta", title: "Browse Live Tier 2 Karambit Inventory",
-      subtitle: "Browse current player listings on CSBoard. P2P sales have a base fee of 2%; item-for-item trades carry no monetary payment.",
-      buttonText: "View Tier 2 Karambit →", buttonUrl: "/en/items/karambit-case-hardened-field-tested?tier=Tier-2", accent: "blue" },
-  ]
-}, null, 2);
+// This example must itself pass the production schema and factual guard.
+export const BLOCKS_EXAMPLE = { blocks: [
+  { type: "hero", title: "How to compare a CS2 skin sale and an instant-sell quote", eyebrow: "skin valuation guide" },
+  { type: "tldr", items: [
+    "Compare the same finish, wear, StatTrak or Souvenir status, and relevant pattern or phase.",
+    "An asking price is not proof of a completed sale at that price.",
+    "P2P sales have a base fee of 2%; instant-sell pricing and withdrawal conditions are separate.",
+    "Compare net proceeds and the stated settlement conditions before confirming a trade.",
+  ]},
+  { type: "text", html: "<h2>compare like-for-like items</h2><p>Record the exact item variant and the date of each price reference. A different wear, pattern or phase may make two listings unsuitable for comparison. Do not infer an item's current availability from the existence of its catalogue page.</p>" },
+  { type: "table", title: "three different price references", cols: ["Reference", "What to check"], rows: [
+    ["Asking price", "Whether the item matches your variant; an asking price does not confirm demand"],
+    ["Recorded sale", "Source, date, currency and matching item properties"],
+    ["Instant-sell quote", "Net amount, validity and settlement conditions of that particular offer"],
+  ]},
+  { type: "callout", style: "info", title: "separate the steps", text: "A quote, an accepted Steam trade, settled balance and an external payout are separate events. Check the offer and payment method for their actual conditions." },
+  { type: "faq", items: [
+    { q: "What is the base fee for a monetary P2P sale?", a: "The base fee for a monetary P2P sale is 2%. An active Premium discount may reduce it. Instant-sell pricing and withdrawal conditions are separate, so use the terms shown for your chosen offer." },
+    { q: "Does a catalogue page mean this item is available now?", a: "No. A catalogue page identifies a type of item. Check current listings or a current quote for availability, price and restrictions before deciding to buy or sell." },
+    { q: "Does adding funds require a Steam item trade?", a: "No. A deposit adds funds to the account balance through the selected payment method. The platform deposit fee is 0%. It is separate from an item transfer through Steam." },
+    { q: "Can an earlier sale price guarantee my future sale price?", a: "No. Earlier transactions provide dated comparisons, not a promise of a future buyer or return. Check matching item properties and the current offer before confirming your decision." },
+    { q: "Where can I review a quote for my inventory?", a: "Open /en/sell to review the available valuation and selling options. Check the items, final amount and applicable conditions. A valuation alone is not a completed sale." },
+  ]},
+  { type: "cta", title: "review your inventory valuation", subtitle: "Compare the amount and conditions before confirming a sale.", buttonText: "review selling options", buttonUrl: "/en/sell", accent: "blue" },
+] };
+const EXAMPLE = JSON.stringify(BLOCKS_EXAMPLE, null, 2);
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -400,19 +401,21 @@ top_list names/notes, callout text, table cells, faq questions/answers, cta
 text) MUST be in ${lang}.
 
 Writing rules:
-- Lead-in tldr: 4-5 scan-friendly bullets with NUMBERS where possible (prices,
-  percentages, ranks).
-- top_list: use real CS2 item names ("Karambit Pattern #387", "AK-47 #661", etc).
+- Lead-in tldr: 4-5 scan-friendly bullets answering the query. Use numbers only
+  when supported by supplied facts or an identified source and period.
+- top_list: omit unless the ranking has a stated criterion and supplied evidence.
+  Never invent investment rankings, returns, prices, liquidity or time-to-sale.
 - callout text: 1-2 short sentences, never a paragraph essay.
 - table: use to compare 2-3 options on 3-5 criteria (fees, payout, KYC, etc).
-- item_grid: only use when you can name 4-8 ACTUAL csboard items with valid
-  /en/items/... or /ru/items/... slugs.
-- faq: 5-8 questions, real concerns a buyer/seller asks. Answer with numbers
-  and concrete CSBoard URLs where the answer involves "where".
+- item_grid: use verified catalogue URLs only. Label them catalogue examples,
+  not live stock or available listings unless current supplied data proves it.
+- faq: 5-8 questions, real concerns a buyer/seller asks. Answer the specific
+  question; do not substitute a repeated fees paragraph for an unrelated answer.
+  Use concrete CSBoard URLs where the answer involves "where".
 - cta button URL should be a concrete csboard page (/en/items/..., /en/trades,
   /en/sell), not the homepage.
 
-Here is a working example (English, knife topic) — match this structure,
+Here is a working example (English, valuation topic) — match this structure,
 not the topic:
 
 ${EXAMPLE}

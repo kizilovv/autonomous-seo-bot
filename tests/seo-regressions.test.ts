@@ -153,3 +153,16 @@ test('old queued payout promises cannot reach the CMS apply path', async () => {
   assert.equal((db.prepare('SELECT status FROM opportunities WHERE id=?').get(id) as {status:string}).status, 'rejected');
   closeDb();
 });
+
+
+import { BLOCKS_EXAMPLE, renderBlocksToHtml } from '../src/generate/blocks-generator.js';
+import { validateBlocks, hasRequiredBlocks } from '../src/generate/blocks-schema.js';
+test('the actual generator example satisfies its schema and publishing rules', () => {
+  const result = validateBlocks(BLOCKS_EXAMPLE.blocks);
+  assert.ok(result.ok, result.ok ? '' : result.errors);
+  if (!result.ok) return;
+  assert.equal(hasRequiredBlocks(result.blocks).ok, true);
+  const html = renderBlocksToHtml(result.blocks);
+  assert.deepEqual(blogReadabilityIssues(html), []);
+  assert.equal(commercialClaimViolation(html, 'editorial'), null);
+});
