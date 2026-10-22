@@ -121,7 +121,7 @@ test('unsupported payout promises and future returns are blocked; historical con
     'Мгновенные выплаты в USDT', 'Вы получаете USDT мгновенно после подтверждения сделки.',
     'Instant USDT payouts', 'Withdrawals are immediate.', 'Receive USDT instantly.',
     'Аналитика позволяет предсказывать рост цен до 30% в год.',
-    'Guaranteed 30% annual returns.', 'We cannot guarantee returns but prices will rise 30% next year.', 'Skin prices will rise 30% next year.',
+    'Tier 2 carries similar appreciation as Tier 1 (15-30% per year) with much higher liquidity.', 'Guaranteed 30% annual returns.', 'We cannot guarantee returns but prices will rise 30% next year.', 'Skin prices will rise 30% next year.',
     'Instant payouts are not guaranteed; receive USDT instantly.',
     '<p>Не гарантируем мгновенные выплаты.</p><p>Вы получаете USDT мгновенно.</p>',
   ];

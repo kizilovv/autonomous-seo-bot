@@ -29,6 +29,9 @@ export function outcomePromiseViolation(text: string): string | null {
     if (/(?:instant|immediate)\s+(?:usdt\s+)?(?:payouts?|withdrawals?)|(?:payouts?|withdrawals?)\s+(?:are|is)\s+(?:instant|immediate)|(?:receive|get)\s+usdt\s+(?:instantly|immediately)|мгновенн[а-яё]*\s+(?:выплат[а-яё]*|вывод[а-яё]*)|(?:выплат[а-яё]*|вывод[а-яё]*)\s+(?:в\s+)?usdt\s+мгновенно|получ[а-яё]*\s+usdt\s+мгновенно/iu.test(claim)) {
       return 'Unsupported instant payout promise: quote, settlement and external payout are separate events';
     }
+    if (/carries[^.!?;]{0,35}appreciation[^.!?;]{0,60}\d+(?:[–-]\d+)?\s*%\s*(?:per year|annually)/iu.test(claim)) {
+      return 'Unsupported quantified future return: skin-price forecasts are not established facts';
+    }
     const forecast = claim
       .replace(/(?:cannot|can't|do not)\s+(?:predict|guarantee)(?:(?!\bbut\b|\bhowever\b| но | однако )[^.!?;]){0,100}/gu, '')
       .replace(/(?:не\s+(?:может|могут|можем)\s+|нельзя\s+|не\s+)(?:предсказ[а-яё]*|прогнозир[а-яё]*|гарантир[а-яё]*)(?:(?!\bbut\b|\bhowever\b| но | однако )[^.!?;]){0,100}/gu, '');
