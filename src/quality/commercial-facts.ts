@@ -13,9 +13,35 @@ CSBoard's operator is Nextrade Labs. Transtrade (also spelled Transtreid / Тр�
 Only mention these entities when relevant; never replace an unknown legal registered name/address with a guess.
 `.trim();
 
+/** High-confidence unsupported promises only; historical data and questions remain reviewable. */
+export function outcomePromiseViolation(text: string): string | null {
+  for (const sentence of text.toLowerCase().split(/(?<=[.!?;])\s+|\n/)) {
+    if (sentence.trim().endsWith('?')) continue;
+    // Remove only explicitly negated promise phrases, not the whole sentence:
+    // a disclaimer must not excuse a second, affirmative promise.
+    const claim = sentence
+      .replace(/(?:no|without)\s+(?:guarantee of|guaranteed)\s+(?:instant|immediate)\s+(?:payouts?|withdrawals?)/gu, '')
+      .replace(/(?:instant|immediate)\s+(?:payouts?|withdrawals?)\s+(?:are|is)\s+not\s+guaranteed/gu, '')
+      .replace(/не\s+гарантируем\s+мгновенн[а-яё]*\s+(?:выплат[а-яё]*|вывод[а-яё]*)/gu, '')
+      .replace(/мгновенн[а-яё]*\s+(?:выплат[а-яё]*|вывод[а-яё]*)\s+не\s+гарантирован[а-яё]*/gu, '');
+    if (/(?:instant|immediate)\s+(?:usdt\s+)?(?:payouts?|withdrawals?)|(?:payouts?|withdrawals?)\s+(?:are|is)\s+(?:instant|immediate)|(?:receive|get)\s+usdt\s+(?:instantly|immediately)|мгновенн[а-яё]*\s+(?:выплат[а-яё]*|вывод[а-яё]*)|(?:выплат[а-яё]*|вывод[а-яё]*)\s+(?:в\s+)?usdt\s+мгновенно|получ[а-яё]*\s+usdt\s+мгновенно/iu.test(claim)) {
+      return 'Unsupported instant payout promise: quote, settlement and external payout are separate events';
+    }
+    const forecast = claim
+      .replace(/(?:cannot|can't|do not)\s+(?:predict|guarantee)(?:(?!\bbut\b|\bhowever\b| но | однако )[^.!?;]){0,100}/gu, '')
+      .replace(/(?:не\s+(?:может|могут|можем)\s+|нельзя\s+|не\s+)(?:предсказ[а-яё]*|прогнозир[а-яё]*|гарантир[а-яё]*)(?:(?!\bbut\b|\bhowever\b| но | однако )[^.!?;]){0,100}/gu, '');
+    if (/(?:returns?|appreciation|prices?|рост|доход|прибыл|цен)/iu.test(forecast) && /(?:predict|guarantee)[a-z]*[^.!?;]{0,70}\d+(?:[.,]\d+)?\s*%|(?:prices?\s+will\s+(?:rise|grow)|will\s+return)[^.!?;]{0,35}\d+(?:[.,]\d+)?\s*%|(?:предсказыв|гарантир|прогнозир)[а-яё]*[^.!?;]{0,70}\d+(?:[.,]\d+)?\s*%/iu.test(forecast)) {
+      return 'Unsupported quantified future return: skin-price forecasts are not established facts';
+    }
+  }
+  return null;
+}
+
 /** Conservative publishing guard, not a calculator. Unsupported claims require review. */
 export function commercialClaimViolation(value: string, context: "csboard" | "editorial" = "csboard"): string | null {
   const text = value.replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, '; ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').replace(/(\d),(\d)/g, '$1.$2');
+  const promise = outcomePromiseViolation(text);
+  if (promise) return promise;
   const clauses = text.split(/[!?;,\n]|\.(?=\s|$)|\\n/).map(s => s.toLowerCase().replace(/[-‑–]/g, " "));
   for (const clause of clauses) {
     // Only explicit third-party attribution is exempt in neutral articles.

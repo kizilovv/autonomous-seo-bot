@@ -114,3 +114,42 @@ test('item snippet proposals are blocked before CMS writes, including old queued
   }
   closeDb();
 });
+
+
+test('unsupported payout promises and future returns are blocked; historical context is retained', () => {
+  const rejected = [
+    'Мгновенные выплаты в USDT', 'Вы получаете USDT мгновенно после подтверждения сделки.',
+    'Instant USDT payouts', 'Withdrawals are immediate.', 'Receive USDT instantly.',
+    'Аналитика позволяет предсказывать рост цен до 30% в год.',
+    'Guaranteed 30% annual returns.', 'We cannot guarantee returns but prices will rise 30% next year.', 'Skin prices will rise 30% next year.',
+    'Instant payouts are not guaranteed; receive USDT instantly.',
+    '<p>Не гарантируем мгновенные выплаты.</p><p>Вы получаете USDT мгновенно.</p>',
+  ];
+  for (const claim of rejected) assert.ok(commercialClaimViolation(claim), claim);
+  const accepted = [
+    'Instant sell quotes are separate from payouts.', 'Payout timing depends on settlement and the selected method.',
+    'Instant payouts are not guaranteed.', 'Не гарантируем мгновенные выплаты.',
+    'Мгновенные выплаты не гарантированы.', 'Are payouts instant?',
+    'Цены выросли на 30% в прошлом году по данным указанного источника.',
+    'Prices rose 30% last year according to the cited dataset.',
+    'Нельзя предсказывать рост цен на 30% по прошлой динамике.',
+    'We cannot guarantee 30% returns.', 'P2P sales have a base fee of 2%.', 'Guaranteed 99.9% uptime.',
+  ];
+  for (const claim of accepted) assert.equal(commercialClaimViolation(claim), null, claim);
+});
+
+
+test('old queued payout promises cannot reach the CMS apply path', async () => {
+  runMigrations();
+  const db = getDb();
+  db.prepare('DELETE FROM opportunities').run();
+  db.prepare('DELETE FROM content').run();
+  const id = insertOpportunity({kind:'snippet_rewrite',locale:'en',path:'/sell',field:'description',query:'sell skins',current_value:null,proposed_value:JSON.stringify('Sell CS2 skins with instant USDT payouts.'),metrics:{impressions:200,ctr:.01,position:5},risk:'low'});
+  const result = await runApply();
+  assert.equal(result.auto_applied, 0);
+  assert.equal(result.errors, 1);
+  assert.match(result.details.join(" "), /Unsupported instant payout promise/);
+  assert.equal((db.prepare('SELECT count(*) n FROM content').get() as {n:number}).n, 0);
+  assert.equal((db.prepare('SELECT status FROM opportunities WHERE id=?').get(id) as {status:string}).status, 'rejected');
+  closeDb();
+});
