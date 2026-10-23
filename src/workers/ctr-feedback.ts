@@ -1,3 +1,4 @@
+import { cmsWriteBlockReason } from "../quality/cms-surface.js";
 import { commercialClaimViolation } from "../quality/commercial-facts.js";
 // CTR feedback: exact page/query, seven complete days before apply vs days 7–13
 // after apply. Wait at least sixteen days for recrawl and GSC data finalisation.
@@ -44,6 +45,7 @@ interface Stats {
   flat: number;
   rolled_back: number;
   insufficient_data: number;
+  unsupported_surface: number;
   errors: number;
   details: string[];
 }
@@ -127,7 +129,7 @@ export function rollbackTo(opp: CandidateRow): { ok: boolean; history_id?: numbe
 export async function runCtrFeedback(): Promise<Stats> {
   const id = startRun("ctr-feedback");
   const stats: Stats = {
-    checked: 0, improved: 0, flat: 0, rolled_back: 0, insufficient_data: 0, errors: 0, details: [],
+    checked: 0, improved: 0, flat: 0, rolled_back: 0, insufficient_data: 0, unsupported_surface: 0, errors: 0, details: [],
   };
   try {
     const cands = fetchCandidates();
@@ -137,6 +139,15 @@ export async function runCtrFeedback(): Promise<Stats> {
       const site = SITE_BY_LOCALE[opp.locale];
       if (!site || !opp.query) continue;
 
+      // A CMS write that cannot render is not an SEO experiment. Keep history,
+      // but never attribute CTR movement to it or roll content back on that basis.
+      const unsupported = cmsWriteBlockReason(opp.path, opp.field);
+      if (unsupported) {
+        db.prepare("UPDATE opportunities SET feedback_checked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), feedback_outcome = 'unsupported_surface' WHERE id = ?").run(opp.id);
+        stats.unsupported_surface++;
+        stats.details.push(`#${opp.id} excluded: ${unsupported}`);
+        continue;
+      }
       const comparison = comparableMetrics(opp, site);
       const cur = comparison?.after;
       if (!cur || !comparison || cur.impressions < 100 || comparison.before.impressions < 100) {

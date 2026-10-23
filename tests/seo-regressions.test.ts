@@ -166,3 +166,22 @@ test('the actual generator example satisfies its schema and publishing rules', (
   assert.deepEqual(blogReadabilityIssues(html), []);
   assert.equal(commercialClaimViolation(html, 'editorial'), null);
 });
+
+
+import { runCtrFeedback } from '../src/workers/ctr-feedback.js';
+test('unrendered trading intro is blocked for queued writes and excluded from CTR attribution', async () => {
+  assert.ok(cmsWriteBlockReason('/cs2-trading', 'intro_extra'));
+  assert.ok(cmsWriteBlockReason('/cs2-trading/', 'intro_extra'));
+  for (const [path, field] of [['/cs2-trading','title'],['/cs2-trading-guide','intro_extra'],['/sell','intro_extra'],['/blog/example','intro_extra']]) assert.equal(cmsWriteBlockReason(path,field),null);
+  runMigrations(); const db=getDb();
+  db.prepare('DELETE FROM opportunities').run(); db.prepare('DELETE FROM content').run();
+  const id=insertOpportunity({kind:'rank_push',locale:'en',path:'/cs2-trading',field:'intro_extra',query:'paired swap cs2',current_value:null,proposed_value:JSON.stringify('A paired swap exchanges items directly.'),metrics:{impressions:187,ctr:.005,position:4},risk:'low'});
+  const applied=await runApply(); assert.equal(applied.auto_applied,0); assert.equal(applied.blocked,1);
+  assert.equal((db.prepare('SELECT count(*) n FROM content').get() as {n:number}).n,0);
+  // Historical applied rows remain auditable but cannot be judged an improvement.
+  db.prepare("UPDATE opportunities SET status='applied', applied_at=datetime('now','-20 days'), baseline_ctr=.005, applied_content_id=633 WHERE id=?").run(id);
+  const feedback=await runCtrFeedback();
+  assert.equal(feedback.unsupported_surface,1); assert.equal(feedback.improved,0); assert.equal(feedback.rolled_back,0);
+  assert.equal((db.prepare('SELECT feedback_outcome FROM opportunities WHERE id=?').get(id) as {feedback_outcome:string}).feedback_outcome,'unsupported_surface');
+  closeDb();
+});
