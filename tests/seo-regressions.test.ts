@@ -172,7 +172,8 @@ import { runCtrFeedback } from '../src/workers/ctr-feedback.js';
 test('unrendered trading intro is blocked for queued writes and excluded from CTR attribution', async () => {
   assert.ok(cmsWriteBlockReason('/cs2-trading', 'intro_extra'));
   assert.ok(cmsWriteBlockReason('/cs2-trading/', 'intro_extra'));
-  for (const [path, field] of [['/cs2-trading','title'],['/cs2-trading-guide','intro_extra'],['/sell','intro_extra'],['/blog/example','intro_extra']]) assert.equal(cmsWriteBlockReason(path,field),null);
+  for (const path of ['/cs2-trading-sites','/cs2-marketplace/']) assert.ok(cmsWriteBlockReason(path,'intro_extra'));
+  for (const [path, field] of [['/cs2-trading','title'],['/cs2-trading-guide','intro_extra'],['/sell','intro_extra'],['/trades','intro_extra'],['/comparison','intro_extra'],['/','intro_extra'],['/blog/example','intro_extra']]) assert.equal(cmsWriteBlockReason(path,field),null);
   runMigrations(); const db=getDb();
   db.prepare('DELETE FROM opportunities').run(); db.prepare('DELETE FROM content').run();
   const id=insertOpportunity({kind:'rank_push',locale:'en',path:'/cs2-trading',field:'intro_extra',query:'paired swap cs2',current_value:null,proposed_value:JSON.stringify('A paired swap exchanges items directly.'),metrics:{impressions:187,ctr:.005,position:4},risk:'low'});
