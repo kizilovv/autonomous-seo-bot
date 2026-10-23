@@ -173,7 +173,7 @@ test('unrendered trading intro is blocked for queued writes and excluded from CT
   assert.ok(cmsWriteBlockReason('/cs2-trading', 'intro_extra'));
   assert.ok(cmsWriteBlockReason('/cs2-trading/', 'intro_extra'));
   for (const path of ['/cs2-trading-sites','/cs2-marketplace/']) assert.ok(cmsWriteBlockReason(path,'intro_extra'));
-  for (const [path, field] of [['/cs2-trading','title'],['/cs2-trading-guide','intro_extra'],['/sell','intro_extra'],['/trades','intro_extra'],['/comparison','intro_extra'],['/','intro_extra'],['/blog/example','intro_extra']]) assert.equal(cmsWriteBlockReason(path,field),null);
+  for (const [path, field] of [['/cs2-trading','title'],['/sell','intro_extra'],['/trades','intro_extra'],['/comparison','intro_extra'],['/','intro_extra']]) assert.equal(cmsWriteBlockReason(path,field),null);
   runMigrations(); const db=getDb();
   db.prepare('DELETE FROM opportunities').run(); db.prepare('DELETE FROM content').run();
   const id=insertOpportunity({kind:'rank_push',locale:'en',path:'/cs2-trading',field:'intro_extra',query:'paired swap cs2',current_value:null,proposed_value:JSON.stringify('A paired swap exchanges items directly.'),metrics:{impressions:187,ctr:.005,position:4},risk:'low'});
@@ -185,4 +185,21 @@ test('unrendered trading intro is blocked for queued writes and excluded from CT
   assert.equal(feedback.unsupported_surface,1); assert.equal(feedback.improved,0); assert.equal(feedback.rolled_back,0);
   assert.equal((db.prepare('SELECT feedback_outcome FROM opportunities WHERE id=?').get(id) as {feedback_outcome:string}).feedback_outcome,'unsupported_surface');
   closeDb();
+});
+
+
+import { classifyAllSites } from '../src/analyze/classifier.js';
+test('classifier uses verified CMS slots for both intro and FAQ opportunities', async () => {
+ runMigrations(); const db=getDb();
+ db.prepare('DELETE FROM opportunities').run(); db.prepare('DELETE FROM content').run(); db.prepare('DELETE FROM gsc_snapshots').run();
+ const ins=db.prepare('INSERT INTO gsc_snapshots(site,snapshot_date,query,page,impressions,clicks,ctr,position) VALUES (?,?,?,?,?,?,?,?)');
+ for(const route of ['/cs2-trading','/cs2-trading-sites','/cs2-marketplace','/trends','/premium','/create-offer','/cs2-skins-prices','/sell']) {
+  for(const pos of [5,15]) ins.run('sc-domain:csboard.com','2026-10-01',`skin exchange ${pos}`,`https://csboard.com/en${route}`,1000,1,.001,pos);
+ }
+ await classifyAllSites({currSince:'2026-10-01',currUntil:'2026-10-01'});
+ const rows=db.prepare("SELECT path,field FROM opportunities WHERE field IN ('intro_extra','faq') ORDER BY field").all();
+ assert.deepEqual(rows,[{path:'/sell',field:'faq'},{path:'/sell',field:'intro_extra'}]);
+ assert.ok(cmsWriteBlockReason('/cs2-marketplace','faq'));
+ assert.equal(cmsWriteBlockReason('/sell/','faq'),null);
+ closeDb();
 });

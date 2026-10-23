@@ -1,4 +1,4 @@
-import { cmsWriteBlockReason } from "../quality/cms-surface.js";
+import { cmsWriteBlockReason, bodyCmsRenders } from "../quality/cms-surface.js";
 // Classifier — turns GSC snapshots into actionable opportunities.
 //
 // Five kinds it detects (Phase 2):
@@ -73,36 +73,8 @@ const MIN_IMPRESSIONS_FOR_DETECTION = 20; // generic floor; per-kind in classify
  */
 const MIN_QUERY_SHARE = 0.05;
 
-/**
- * Only these path prefixes render CMS `intro_extra` / `faq` body fields via
- * <SeoContent>. Writing intro_extra to other paths is a no-op — the value
- * lives in the DB but never gets rendered, so the SEO push doesn't land.
- * Sources: cs2-tradeboard-frontend audit 2026-05-13 — only layouts that
- * import `@/components/seo/SeoContent` are eligible.
- *
- * Item snippet rewrites are excluded by cmsWriteBlockReason. Other snippets — they're consumed by
- * `lib/seo.ts` `generateMetadata` which is wired into every layout.
- */
-export const BODY_CMS_PATHS = [
-  "/",          // home (home)/layout.tsx
-  "/sell",
-  "/trades",
-  "/comparison",
-  "/trends",
-  "/cs2-trading-sites",
-  "/premium",
-  "/create-offer",
-  "/cs2-trading",
-  "/cs2-marketplace",
-  "/cs2-skins-prices",
-] as const;
-
-function bodyCmsRenders(path: string): boolean {
-  if (BODY_CMS_PATHS.includes(path as typeof BODY_CMS_PATHS[number])) return true;
-  // /items/[name], /blog/[slug], /weapons/[weapon], /profile/[steamId] all
-  // render their own content and ignore CMS intro_extra/faq fields.
-  return false;
-}
+// Shared with generator, applier and CTR feedback: one verified rendering map.
+export { BODY_CMS_PATHS } from "../quality/cms-surface.js";
 
 export async function classifyAllSites(args: {
   // Window for the "current" snapshot (e.g. last 28 days).
