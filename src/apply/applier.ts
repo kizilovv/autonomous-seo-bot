@@ -1,3 +1,4 @@
+import { queryEligibilityIssue } from "../quality/query-eligibility.js";
 import { cmsWriteBlockReason } from "../quality/cms-surface.js";
 import { commercialClaimViolation } from "../quality/commercial-facts.js";
 // Auto-applier — writes approved opportunities to the SEO content table.
@@ -137,7 +138,7 @@ export async function runApply(_perBatch = 30): Promise<ApplyStats> {
 
     for (const opp of pending) {
       try {
-        const surfaceBlock = cmsWriteBlockReason(opp.path, opp.field);
+        const surfaceBlock = queryEligibilityIssue(opp.query) || cmsWriteBlockReason(opp.path, opp.field);
         if (surfaceBlock) {
           stats.blocked++;
           rejectOpportunity(opp.id, surfaceBlock);

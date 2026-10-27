@@ -88,3 +88,17 @@ test('approval HTTP returns actionable 422 and never publishes a failed draft', 
     assert.equal(getBlogBySlug('en','old-unsafe'),null);
   } finally { await app.close(); closeDb(); }
 });
+
+test('pre-existing snippet proposals with instruction-shaped queries cannot bypass generation preflight', async () => {
+  const { insertOpportunity }=await import('../src/db/repo.js');
+  const { runApply }=await import('../src/apply/applier.js');
+  runMigrations();
+  const db=getDb();
+  const id=insertOpportunity({kind:'snippet_rewrite',locale:'en',path:'/sell',field:'description',query:'context: location: united states sell skins',current_value:null,proposed_value:JSON.stringify('Compare your CS2 skin quote and the actual selling terms on CSBoard.'),metrics:{impressions:200,ctr:.01,position:5},risk:'low'});
+  const result=await runApply();
+  assert.equal(result.auto_applied,0);assert.equal(result.blocked,1);
+  assert.match(result.details.join(' '),/instruction-shaped/);
+  assert.equal((db.prepare('SELECT status FROM opportunities WHERE id=?').get(id) as any).status,'rejected');
+  assert.equal((db.prepare('SELECT count(*) n FROM content').get() as any).n,0);
+  closeDb();
+});

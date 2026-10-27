@@ -15,7 +15,7 @@ const BRAND_FACTS = `
 CSBoard (csboard.com / csboard.trade) is a P2P marketplace for CS2 (Counter-Strike 2) skin trading.
 Hard facts you can reference:
 - Skin sales, available payout methods and payout timing are separate conditions; do not invent current methods or network support.
-- P2P trading directly with real players (no bots in the middle)
+- Item-for-item swaps use Steam; monetary purchases use platform balance and settlement.
 - Inventory, listing counts and prices change. Use only current page/API data; omit numbers when none is supplied.
 ${COMMERCIAL_FACTS}
 - Item transfers use Steam's trading system; users must check the recipient and items before confirming.
