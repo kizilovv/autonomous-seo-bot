@@ -1,3 +1,4 @@
+import { BlogQualityError } from "../quality/blog-publication.js";
 import Fastify from "fastify";
 import { config, allowedOrigins } from "../config.js";
 import { logger } from "../logger.js";
@@ -118,7 +119,12 @@ export async function buildHttpServer() {
   app.post<{ Params: { id: string } }>("/v1/blog/:id/approve", async (req, reply) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) { reply.code(400); return { error: "bad id" }; }
-    const changed = approveBlog(id);
+    let changed: number;
+    try { changed = approveBlog(id); }
+    catch (error) {
+      if (error instanceof BlogQualityError) { reply.code(422); return { error: error.message, issues: error.issues }; }
+      throw error;
+    }
     if (!changed) { reply.code(404); return { error: "no pending blog with that id" }; }
     return { id, status: "published" };
   });

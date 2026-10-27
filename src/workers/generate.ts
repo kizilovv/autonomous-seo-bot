@@ -1,3 +1,4 @@
+import { queryEligibilityIssue } from "../quality/query-eligibility.js";
 import { cmsWriteBlockReason } from "../quality/cms-surface.js";
 // Generate proposals for `pending` opportunities that don't have one yet.
 // Tier-1 free models first, fall back to paid; cache hits don't count toward spend.
@@ -92,7 +93,7 @@ export async function runGenerate(): Promise<GenerateStats> {
     const seen = new Set<string>();
     const filteredQueue: typeof queue = [];
     for (const opp of queue) {
-      const surfaceBlock = cmsWriteBlockReason(opp.path, opp.field);
+      const surfaceBlock = queryEligibilityIssue(opp.query) || cmsWriteBlockReason(opp.path, opp.field);
       if (surfaceBlock) {
         rejectOpportunity(opp.id, surfaceBlock);
         continue;

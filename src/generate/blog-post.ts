@@ -34,7 +34,7 @@ export interface BlogDraft {
 const BRAND = `
 CSBoard (csboard.com / csboard.trade) — P2P CS2 skin marketplace. Hard facts:
 • Available payout methods and timing depend on the transaction; do not invent current methods or network support
-• P2P trades direct between players (no bot middlemen)
+• Direct item-for-item swaps use Steam; monetary purchases settle through platform balance
 • Inventory, listing counts and prices change; use current supplied data or omit numbers
 ${COMMERCIAL_FACTS}
 • Trades execute via Steam's official trade system

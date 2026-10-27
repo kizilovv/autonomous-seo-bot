@@ -1,5 +1,5 @@
-import { commercialClaimViolation } from "../quality/commercial-facts.js";
-import { blogReadabilityIssues } from "../quality/blog-readability.js";
+import { blogPublicationIssues } from "../quality/blog-publication.js";
+import { blogTopicEligibilityIssue } from "../quality/query-eligibility.js";
 // Blog generator worker.
 // Two phases:
 //   A) Topic detection — group GSC queries into clusters with shared intent,
@@ -48,14 +48,6 @@ function localeOf(query: string): "en" | "ru" {
   return /[А-Яа-яЁё]/.test(query) ? "ru" : "en";
 }
 
-/** Reject GSC operator-search queries (site:, inurl:, intitle:, etc.) — these
- * are owner-side audits (us / Google / SEO tools running ownership checks),
- * NOT user search intent. Generating blogs from them produces nonsense like
- * "How site:.trade trc20 search helps find...". */
-function isOperatorQuery(q: string): boolean {
-  return /\b(site|inurl|intitle|intext|filetype|cache|related|allintitle|allinurl):/i.test(q);
-}
-
 function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -98,7 +90,7 @@ interface Cluster {
 function buildClusters(rows: QueryRow[]): Cluster[] {
   // Filter brand + tiny queries + Google search-operator junk
   const filtered = rows.filter(
-    (r) => !CSBOARD_BRAND_RE.test(r.query) && !isOperatorQuery(r.query) && r.impressions >= 5
+    (r) => !CSBOARD_BRAND_RE.test(r.query) && !blogTopicEligibilityIssue(r.query) && r.impressions >= 5
   );
   // Sort by impressions desc — biggest queries seed clusters
   filtered.sort((a, b) => b.impressions - a.impressions);
@@ -257,6 +249,14 @@ export async function runBlogGenerator() {
       if (enQueue[i]) queue.push(enQueue[i]);
     }
     for (const topic of queue) {
+      const cluster_queries: string[] = topic.cluster_queries ? JSON.parse(topic.cluster_queries) : [];
+      const eligibility = [topic.primary_query, ...cluster_queries].map(blogTopicEligibilityIssue).find(Boolean);
+      if (eligibility) {
+        markTopicStatus(topic.id, "skipped");
+        stats.topics_skipped++;
+        logger.info({ topicId: topic.id, reason: eligibility }, "blog topic skipped before paid generation");
+        continue;
+      }
       const b = budgetExceeded();
       if (!b.ok) {
         stats.budget_stopped = true;
@@ -265,7 +265,6 @@ export async function runBlogGenerator() {
       }
       try {
         markTopicStatus(topic.id, "generating");
-        const cluster_queries = topic.cluster_queries ? (JSON.parse(topic.cluster_queries) as string[]) : [];
         const topicInput = {
           primary_query: topic.primary_query,
           locale: topic.locale as "en" | "ru",
@@ -326,9 +325,7 @@ export async function runBlogGenerator() {
           body_html = `${draft.body_html}\n${htmlSection}`;
         }
 
-        const readabilityIssues = blogReadabilityIssues(body_html);
-        const commercialIssue = commercialClaimViolation([draft.title, draft.meta_title, draft.meta_description, body_html, JSON.stringify(draft.faq)].join(". "), "editorial");
-        if (commercialIssue) readabilityIssues.push(commercialIssue);
+        const readabilityIssues = blogPublicationIssues({ ...draft, body_html, body_md });
         const requiresApproval = BLOG_APPROVAL_ENABLED || readabilityIssues.length > 0;
         if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog held for readability review");
         const blogId = insertBlog({

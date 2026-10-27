@@ -1,3 +1,4 @@
+import { blogPublicationIssues, BlogQualityError } from "../quality/blog-publication.js";
 // Data layer for the blog-generator (Phase 5).
 // Kept separate from repo.ts so it's clear this is the long-form content path.
 
@@ -114,6 +115,7 @@ export function insertBlog(args: InsertBlogArgs, status: "published" | "pending_
   // pending_approval blogs stay unpublished (published_at NULL) until an operator
   // approves; getBlogBySlug/listPublishedBlogs filter status='published', so they
   // never serve on the site before approval.
+  if (status === "published" && blogPublicationIssues(args).length) status = "pending_approval";
   const publishedAt = status === "published" ? new Date().toISOString() : null;
   const r = db
     .prepare(
@@ -158,13 +160,18 @@ export function listPendingBlogs(limit = 50): Array<{ id: number; slug: string; 
 
 /** Approve a pending blog → publish it now. Returns affected row count. */
 export function approveBlog(id: number): number {
-  const db = getDb();
-  const r = db
-    .prepare(
-      "UPDATE generated_blogs SET status = 'published', published_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status = 'pending_approval'"
-    )
-    .run(id);
-  return r.changes;
+  return tx((db: Database) => {
+    const draft = db.prepare("SELECT * FROM generated_blogs WHERE id = ? AND status = 'pending_approval'").get(id) as GeneratedBlog | undefined;
+    if (!draft) return 0;
+    const issues = blogPublicationIssues(draft);
+    if (issues.length) throw new BlogQualityError(issues);
+    const r = db
+      .prepare(
+        "UPDATE generated_blogs SET status = 'published', published_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status = 'pending_approval'"
+      )
+      .run(id);
+    return r.changes;
+  });
 }
 
 /** Reject a pending blog → retire it (never served). Returns affected row count. */

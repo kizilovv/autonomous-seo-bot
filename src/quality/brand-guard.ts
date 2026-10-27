@@ -1,3 +1,4 @@
+import { queryEligibilityIssue } from "./query-eligibility.js";
 // Brand guard — keeps competitor names, competitor URLs and stray domains out
 // of anything the bot writes into the public CMS.
 //
@@ -141,6 +142,8 @@ export function findForeignDomain(text: string): string | null {
  */
 export function isPoisonedQuery(query: string | null | undefined, path?: string | null): string | null {
   if (!query) return null;
+  const eligibility = queryEligibilityIssue(query);
+  if (eligibility) return eligibility;
   // A comparison page is allowed to chase "<competitor> alternative" demand —
   // that is its whole reason to exist. Everywhere else a competitor-branded
   // query can only be answered by naming them, on a page that shouldn't.
