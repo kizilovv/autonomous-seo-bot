@@ -23,9 +23,13 @@ export function productCapabilityIssues(value: string): string[] {
   if (/tier filter[^.!?]{0,60}(?:any|every|all)\s+(?:item|weapon|knife|categor)|(?:any|every|all)\s+(?:item|weapon|knife|categor)[^.!?]{0,60}tier filter/iu.test(text)) {
     issues.add('Unsupported universal tier filter claim');
   }
+  // The factual correction in observed drafts 598/601 explicitly denies direct
+  // settlement. Remove only that exact negated phrase, not the whole sentence:
+  // a later affirmative claim must still be caught.
+  const cryptoClaims = text.replace(/\bdoes not mean (?:that )?(?:the )?buyer (?:sends?|pays?|transfers?) (?:bitcoin|btc|crypto(?:currency)?)(?: or other money)? directly to (?:the |your )?(?:seller|wallet)\b/giu, '');
   // A review hold is deliberately conservative. Crypto discussion is allowed;
   // instructions to select a listing payout or direct buyer-wallet settlement need correction.
-  if (/(?:bitcoin|btc|crypto)[^.!?]{0,100}(?:sent|send|paid|transferred)\s+directly[^.!?]{0,70}(?:buyer|wallet)|buyer[^.!?]{0,80}(?:send|pay|transfer)[^.!?]{0,60}(?:bitcoin|btc|crypto)|(?:select|choose|set)[^.!?]{0,30}(?:bitcoin|btc)[^.!?]{0,60}(?:payout|payment)|(?:выбер|выбира|укаж)[а-яё]*[^.!?]{0,40}(?:bitcoin|btc|биткоин)[^.!?]{0,60}(?:выплат|оплат)|покупател[а-яё]*[^.!?]{0,60}(?:отправ|перевод|плат)[а-яё]*[^.!?]{0,40}(?:биткоин|bitcoin|btc|крипт)/iu.test(text)) {
+  if (/(?:bitcoin|btc|crypto)[^.!?]{0,100}(?:sent|send|paid|transferred)\s+directly[^.!?]{0,70}(?:buyer|wallet)|buyer[^.!?]{0,80}(?:send|pay|transfer)[^.!?]{0,60}(?:bitcoin|btc|crypto)|(?:select|choose|set)[^.!?]{0,30}(?:bitcoin|btc)[^.!?]{0,60}(?:payout|payment)|(?:выбер|выбира|укаж)[а-яё]*[^.!?]{0,40}(?:bitcoin|btc|биткоин)[^.!?]{0,60}(?:выплат|оплат)|покупател[а-яё]*[^.!?]{0,60}(?:отправ|перевод|плат)[а-яё]*[^.!?]{0,40}(?:биткоин|bitcoin|btc|крипт)/iu.test(cryptoClaims)) {
     issues.add('Unverified direct crypto payment or listing payout selection: monetary P2P sales use platform balance');
   }
   return [...issues];

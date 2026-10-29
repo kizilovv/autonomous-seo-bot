@@ -50,7 +50,10 @@ export function outcomePromiseViolation(text: string): string | null {
 
 /** Conservative publishing guard, not a calculator. Unsupported claims require review. */
 export function commercialClaimViolation(value: string, context: "csboard" | "editorial" = "csboard"): string | null {
-  const text = value.replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, '; ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').replace(/(\d),(\d)/g, '$1.$2');
+  // A retained legacy URL is not visible commercial copy. Check the Markdown
+  // anchor label, just as stripping HTML already preserves text but drops href.
+  const text = value.replace(/\]\((?:https?:\/\/|\/)[^\s)]+\)/giu, ']')
+    .replace(/<\/(?:p|div|li|tr|h[1-6])>/gi, '; ').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').replace(/(\d),(\d)/g, '$1.$2');
   const promise = outcomePromiseViolation(text);
   if (promise) return promise;
   const clauses = text.split(/[!?;,\n]|\.(?=\s|$)|\\n/).map(s => s.toLowerCase().replace(/[-‑–]/g, " "));

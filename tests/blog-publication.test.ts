@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { productCapabilityIssues, anonymousComparisonIssues, blogPublicationIssues, BlogQualityError } from '../src/quality/blog-publication.js';
 import { queryEligibilityIssue, blogTopicEligibilityIssue } from '../src/quality/query-eligibility.js';
 import { isPoisonedQuery } from '../src/quality/brand-guard.js';
+import { commercialClaimViolation } from '../src/quality/commercial-facts.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { getDb, closeDb } from '../src/db/connection.js';
 import { insertBlog, approveBlog, getBlogBySlug, findRelatedBlogs, type InsertBlogArgs } from '../src/db/blog-repo.js';
@@ -78,6 +79,23 @@ test('related read selection does not reintroduce old promises and does not alte
   assert.deepEqual(findRelatedBlogs('en','cs2 skin trading','self-related',1),[{slug:'safe-related',title:'CS2 skin trading: compare exact variants'}]);
   assert.deepEqual(db.prepare('SELECT * FROM generated_blogs ORDER BY id').all(),before);
   closeDb();
+});
+
+test('legacy Markdown destinations are not claims, but misleading anchor labels still are', () => {
+  for (const target of ['/en/blog/zero-fee-instant-usdt-payouts','https://csboard.com/en/blog/zero-fee-instant-usdt-payouts']) {
+    assert.equal(commercialClaimViolation(`[CSBoard settlement requirements](${target})`,'editorial'),null);
+    assert.ok(commercialClaimViolation(`[Instant USDT payouts](${target})`,'editorial'));
+    assert.ok(commercialClaimViolation(`[Zero-fee P2P selling](${target})`,'editorial'));
+  }
+});
+
+test('explicit denial of direct buyer crypto settlement is not an affirmative promise', () => {
+  const correction = 'A direct Steam item transfer does not mean the buyer sends Bitcoin or other money directly to the seller.';
+  assert.deepEqual(productCapabilityIssues(correction),[]);
+  assert.deepEqual(productCapabilityIssues('This does not mean the buyer sends crypto directly to your wallet.'),[]);
+  assert.ok(productCapabilityIssues(correction+' However, the buyer sends Bitcoin directly to your wallet.').length);
+  assert.ok(productCapabilityIssues('The buyer sends Bitcoin directly to the seller.').length);
+  assert.ok(productCapabilityIssues('Select Bitcoin as your payout method.').length);
 });
 
 test('instruction-shaped queries are blocked while real commercial and technical intent survives', () => {
