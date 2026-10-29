@@ -302,6 +302,7 @@ export async function runBlogGenerator() {
         const related = findRelatedBlogs(topic.locale, topic.primary_query, slug, 3);
         let body_md = draft.body_md;
         let body_html = draft.body_html;
+        let body_blocks = "body_blocks" in draft ? (draft as BlogBlocksDraft).body_blocks : undefined;
         if (related.length) {
           const sectionTitle = topic.locale === "ru" ? "Похожие материалы" : "Related reads";
           // Single domain since 2026-07: csboard.trade is a blanket 302 to
@@ -323,9 +324,12 @@ export async function runBlogGenerator() {
           ].join("\n");
           body_md = `${draft.body_md}\n${mdLines.join("\n")}\n`;
           body_html = `${draft.body_html}\n${htmlSection}`;
+          // Structured pages render blocks, not the HTML fallback. Keep the
+          // same crawlable links in the representation users actually see.
+          if (body_blocks) body_blocks = [...body_blocks, { type: "text", html: htmlSection }];
         }
 
-        const readabilityIssues = blogPublicationIssues({ ...draft, body_html, body_md });
+        const readabilityIssues = blogPublicationIssues({ ...draft, body_html, body_md, body_blocks });
         const requiresApproval = BLOG_APPROVAL_ENABLED || readabilityIssues.length > 0;
         if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog held for readability review");
         const blogId = insertBlog({
@@ -346,7 +350,7 @@ export async function runBlogGenerator() {
           // body_blocks is set only when the blocks generator produced it.
           // Legacy genBlogPost() drafts have no body_blocks → column stays NULL,
           // FE falls back to body_html rendering as before.
-          body_blocks: "body_blocks" in draft ? (draft as BlogBlocksDraft).body_blocks : undefined,
+          body_blocks,
         }, requiresApproval ? "pending_approval" : "published");
         markTopicStatus(topic.id, "generated", blogId);
         stats.blogs_generated++;

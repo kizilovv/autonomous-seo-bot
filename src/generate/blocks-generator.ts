@@ -46,7 +46,7 @@ and their fields (every field marked "required" must be present):
 
 1. hero  REQUIRED FIRST BLOCK
    { "type": "hero", "title": string (required, 30-120 chars, the H1),
-     "eyebrow": string (optional, 10-60 chars, e.g. "2026 Edition · Trading Guide"),
+     "eyebrow": string (optional, 10-60 chars, e.g. "Trading Guide"; no decorative edition year),
      "image": string (OMIT — image will be resolved by the bot) }
 
 2. tldr  (recommended, place right after hero)
@@ -405,7 +405,7 @@ Writing rules:
 - top_list: omit unless the ranking has a stated criterion and supplied evidence.
   Never invent investment rankings, returns, prices, liquidity or time-to-sale.
 - callout text: 1-2 short sentences, never a paragraph essay.
-- table: use to compare 2-3 options on 3-5 criteria (fees, payout, KYC, etc).
+- table: compare verified transaction mechanics and requirements. Numeric third-party fees require named providers and official sources supplied in the brief; otherwise omit them. Never create a "typical other marketplaces" fee column.
 - item_grid: use verified catalogue URLs only. Label them catalogue examples,
   not live stock or available listings unless current supplied data proves it.
 - faq: 5-8 questions, real concerns a buyer/seller asks. Answer the specific
@@ -487,7 +487,7 @@ Write the blocks now.`;
   // Enforce hero first
   if (blocks[0].type !== "hero") {
     logger.warn({ first: blocks[0].type }, "blog-blocks: first block is not hero — prepending synthetic hero");
-    blocks.unshift({ type: "hero", title: topic.primary_query, eyebrow: isRu ? "2026 · Гид" : "2026 · Guide" });
+    blocks.unshift({ type: "hero", title: topic.primary_query, eyebrow: isRu ? "Гид" : "Guide" });
   }
 
   // Resolve images

@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { productCapabilityIssues, blogPublicationIssues, BlogQualityError } from '../src/quality/blog-publication.js';
+import { productCapabilityIssues, anonymousComparisonIssues, blogPublicationIssues, BlogQualityError } from '../src/quality/blog-publication.js';
 import { queryEligibilityIssue, blogTopicEligibilityIssue } from '../src/quality/query-eligibility.js';
 import { isPoisonedQuery } from '../src/quality/brand-guard.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { getDb, closeDb } from '../src/db/connection.js';
-import { insertBlog, approveBlog, getBlogBySlug, type InsertBlogArgs } from '../src/db/blog-repo.js';
+import { insertBlog, approveBlog, getBlogBySlug, findRelatedBlogs, type InsertBlogArgs } from '../src/db/blog-repo.js';
 
 test('observed draft 594/595 inventions require correction', () => {
   for (const text of [
@@ -33,6 +33,51 @@ test('observed draft 594/595 inventions require correction', () => {
 test('unsafe structured blocks cannot hide behind a clean HTML fallback', () => {
   const issues = blogPublicationIssues({body_html:'<p>Check current offers.</p>',body_blocks:[{type:'cta',text:'Select Bitcoin as your payout method.'}]});
   assert.ok(issues.some(x => x.includes('crypto')));
+});
+
+test('observed anonymous competitor rates are held in each supported representation', () => {
+  const table = {type:'table',cols:['Transaction type','CSBoard','Typical other marketplaces'],rows:[['P2P sale','Base 2%','5–15%']]};
+  for (const body_blocks of [[table], JSON.stringify([table])]) {
+    assert.equal(anonymousComparisonIssues({body_html:'<p>Review the actual terms.</p>',body_blocks}).length,1);
+  }
+  assert.equal(anonymousComparisonIssues({body_html:'<table><tr><th>Other marketplaces</th><td>5–15%</td></tr></table>'}).length,1);
+  assert.equal(anonymousComparisonIssues({body_html:'',body_md:'| Другие площадки | 5–15% |\n|---|---|'}).length,1);
+  for (const draft of [
+    {body_html:'',body_blocks:[{type:'table',cols:['Action','CSBoard fee'],rows:[['Deposit','0%'],['P2P sale','Base 2%']]}]},
+    {body_html:'',body_md:'CSBoard P2P sales: base 2%.\n\n| Other marketplaces | Check their terms |\n|---|---|'},
+    {body_html:'<p>Compare other marketplaces before selling. CSBoard P2P sale fee is 2%.</p>'},
+  ]) assert.deepEqual(anonymousComparisonIssues(draft),[]);
+});
+
+test('browser-only promises are separated from catalogue browsing and supported clients', () => {
+  for (const text of [
+    'The marketplace runs entirely in your browser.',
+    'Sell skins without installing any software.',
+    'Платформа работает только в браузере.',
+    'Продавайте скины без установки приложения.',
+  ]) assert.ok(productCapabilityIssues(text).some(x => x.includes('browser-only')),text);
+  for (const text of [
+    'Browse the catalogue in your browser without installing an extension.',
+    'P2P sellers send trades through a supported extension or app.',
+    'Просмотр каталога доступен в браузере. Для отправки P2P требуется поддерживаемый клиент.',
+  ]) assert.deepEqual(productCapabilityIssues(text),[],text);
+});
+
+test('related read selection does not reintroduce old promises and does not alter published rows', () => {
+  runMigrations();
+  const db = getDb();
+  const add = db.prepare('INSERT INTO generated_blogs(slug,locale,title,body_html,primary_query,status) VALUES (?,?,?,?,?,?)');
+  for (const [slug,locale,title,status] of [
+    ['unsafe-related','en','CS2 skin trading: instant USDT payouts','published'],
+    ['safe-related','en','CS2 skin trading: compare exact variants','published'],
+    ['pending-related','en','CS2 skin trading checklist','pending_approval'],
+    ['ru-related','ru','CS2 skin trading guide','published'],
+    ['self-related','en','CS2 skin trading requirements','published'],
+  ]) add.run(slug,locale,title,'<p>Read current terms.</p>','cs2 skin trading',status);
+  const before = db.prepare('SELECT * FROM generated_blogs ORDER BY id').all();
+  assert.deepEqual(findRelatedBlogs('en','cs2 skin trading','self-related',1),[{slug:'safe-related',title:'CS2 skin trading: compare exact variants'}]);
+  assert.deepEqual(db.prepare('SELECT * FROM generated_blogs ORDER BY id').all(),before);
+  closeDb();
 });
 
 test('instruction-shaped queries are blocked while real commercial and technical intent survives', () => {

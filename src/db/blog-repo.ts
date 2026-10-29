@@ -251,7 +251,9 @@ export function findRelatedBlogs(
   });
 
   return scored
-    .filter((b) => b.score >= 1)
+    // Existing published content is not silently rewritten. Do not copy an old
+    // unsupported promise into new articles just because its tokens overlap.
+    .filter((b) => b.score >= 1 && blogPublicationIssues({title:b.title, body_html:''}).length === 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map(({ slug, title }) => ({ slug, title }));

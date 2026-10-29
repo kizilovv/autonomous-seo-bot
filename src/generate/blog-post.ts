@@ -190,7 +190,7 @@ Output STRICT JSON (no markdown wrapper, no surrounding code fences) matching th
 {
   "title": string,                    // post H1, 50-70 chars, naturally includes the primary query
   "meta_title": string,               // <title> tag, 50-60 chars, ends with " — CSBoard"
-  "meta_description": string,         // <meta description>, MAX 155 chars (Google truncates ~155). Start with an active verb or "2026" (e.g. "Compare the top 5..." / "2026 guide:..."). Include the primary query. NO filler ("learn about", "this article covers", "in this guide we").
+  "meta_description": string,         // <meta description>, MAX 155 chars. Start with the concrete answer or an active verb. Include the primary query. No decorative year or unsupported freshness claim. NO filler ("learn about", "this article covers", "in this guide we").
   "excerpt": string,                  // 1-2 sentence preview (140-220 chars)
   "category": string,                 // one of: "Trading Guide" | "Market Analysis" | "Knife Guide" | "Skin Guide" | "Investment"
   "tags": string[],                   // 4-7 lowercase tags

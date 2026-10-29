@@ -5,6 +5,11 @@ import { blogReadabilityIssues } from './blog-readability.js';
 export function productCapabilityIssues(value: string): string[] {
   const issues = new Set<string>();
   const text = value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  // Observed draft 599: a universal browser-only answer hides the P2P sending client.
+  // This is a review hold, not a prohibition on browser-based catalogue browsing.
+  if (/(?:marketplace|csboard|platform)\s+(?:runs|works|operates)\s+(?:entirely|solely|only)\s+in\s+(?:your|the|a)\s+browser|(?:sell|selling|прода[а-яё]*)[^.!?]{0,60}(?:without installing|no (?:software|extension|app) (?:needed|required)|без установки)|(?:маркетплейс|платформа|csboard)\s+работает\s+(?:полностью|только)\s+в\s+браузере/iu.test(text)) {
+    issues.add('Unqualified browser-only workflow: P2P sellers need a supported sending client; scope browsing separately');
+  }
   if (/authenticity\s*,?\s*tier\s*,?\s*supply\s*,?\s*(?:and|&)\s*exterior|\batse\s+(?:framework|method|system)\b/iu.test(text)) {
     issues.add('Unverified ATSE framework: preserve the queried entity; do not invent its expansion');
   }
@@ -26,6 +31,29 @@ export function productCapabilityIssues(value: string): string[] {
   return [...issues];
 }
 
+/** Anonymous comparison tables cannot be verified, even with an unrelated source link. */
+export function anonymousComparisonIssues(draft: BlogContentForReview): string[] {
+  const regions: string[] = [];
+  let blocks = draft.body_blocks;
+  if (typeof blocks === 'string') {
+    try { blocks = JSON.parse(blocks); } catch { /* Existing schema validation handles malformed blocks. */ }
+  }
+  if (Array.isArray(blocks)) {
+    for (const block of blocks) {
+      if (block && typeof block === 'object' && block.type === 'table') regions.push(JSON.stringify(block));
+    }
+  }
+  for (const match of draft.body_html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/giu)) regions.push(match[0]);
+  // Markdown tables: separate paragraphs so a legitimate CSBoard percentage elsewhere
+  // does not turn an otherwise qualitative comparison into a false numeric claim.
+  for (const paragraph of (draft.body_md ?? '').split(/\n\s*\n/)) {
+    if (/\|.*\|/u.test(paragraph)) regions.push(paragraph);
+  }
+  return regions.some(region => /(?:typical\s+)?other\s+(?:marketplaces|platforms|sites)|typical\s+competitors|други[ех]\s+(?:маркетплейс|площадк|сайт)|типичн[а-яё]*\s+конкурент/iu.test(region)
+    && /\d+(?:[.,]\d+)?\s*%/u.test(region))
+    ? ['Anonymous numeric marketplace comparison: name each provider and verify transaction-specific official sources before publishing'] : [];
+}
+
 export interface BlogContentForReview {
   title?: string | null;
   meta_title?: string | null;
@@ -42,7 +70,7 @@ export function blogPublicationIssues(draft: BlogContentForReview): string[] {
   const value = [draft.title, draft.meta_title, draft.meta_description, draft.excerpt,
     draft.body_html, draft.body_md, typeof draft.faq === 'string' ? draft.faq : JSON.stringify(draft.faq),
     typeof draft.body_blocks === 'string' ? draft.body_blocks : JSON.stringify(draft.body_blocks)].filter(Boolean).join('\n');
-  const issues = [...blogReadabilityIssues(draft.body_html), ...productCapabilityIssues(value)];
+  const issues = [...blogReadabilityIssues(draft.body_html), ...productCapabilityIssues(value), ...anonymousComparisonIssues(draft)];
   const commercial = commercialClaimViolation(value, 'editorial');
   if (commercial) issues.push(commercial);
   return [...new Set(issues)];
