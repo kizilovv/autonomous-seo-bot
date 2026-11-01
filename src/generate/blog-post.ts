@@ -1,4 +1,4 @@
-import { CASE_CONTENT_FACTS } from "../quality/case-contents.js";
+import { caseContentFactsForQuery } from "../quality/case-contents.js";
 import { COMMERCIAL_FACTS } from "../quality/commercial-facts.js";
 // Full blog-post generator. Targets: 1200-1800 words, structured Markdown body,
 // dedicated meta tags + FAQ. Outputs a JSON envelope so we can persist + render.
@@ -38,7 +38,6 @@ CSBoard (csboard.com / csboard.trade) — P2P CS2 skin marketplace. Hard facts:
 • Direct item-for-item swaps use Steam; monetary purchases settle through platform balance
 • Inventory, listing counts and prices change; use current supplied data or omit numbers
 ${COMMERCIAL_FACTS}
-${CASE_CONTENT_FACTS}
 • Trades execute via Steam's official trade system
 DO NOT invent features. Only mention CSBoard where it provides genuine value to the reader (1-3 mentions across the whole post; never spam).
 
@@ -184,6 +183,7 @@ export async function genBlogPost(topic: BlogTopicInput): Promise<BlogDraft> {
   const lang = isRu ? "Russian (Cyrillic)" : "English";
 
   const sys = `${BRAND}
+${caseContentFactsForQuery(topic.primary_query)}
 
 You are writing a single SEO blog post for CSBoard.
 ${FORBIDDEN_PHRASES_NOTE}

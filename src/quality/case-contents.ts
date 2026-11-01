@@ -16,9 +16,15 @@ export const CS20_CONTENTS: Record<string, string> = {
   'FAMAS | Commemoration': 'Covert',
 };
 export const CASE_CONTENT_FACTS = `Case-content tables must come from a verified container list, never model memory. Do not infer current drop-pool status or guarantee item availability.
-Reviewed CS20 Case contents (Valve, checked2026-11-01): ${JSON.stringify(CS20_CONTENTS)}.
-CS20 has the Classic Knife as its rare special item; the17 weapon finishes are not its only possible result. Source: ${CS20_SOURCE}.
+Reviewed CS20 Case contents (Valve, checked 2026-11-01): ${JSON.stringify(CS20_CONTENTS)}.
+CS20 has the Classic Knife as its rare special item; the 17 weapon finishes are not its only possible result. Source: ${CS20_SOURCE}.
 For other cases, do not invent a complete contents/rarity table without supplied verified container data.`;
+
+export function caseContentFactsForQuery(query: string): string {
+  if (/\bcs20\b/i.test(query)) return CASE_CONTENT_FACTS;
+  if (/\bcase\b|кейс/i.test(query)) return 'Case-content tables require a supplied, verified container dataset. Do not invent contents, rarities or current drop-pool status.';
+  return '';
+}
 
 interface Draft { title?: string | null; body_html: string; body_md?: string | null; body_blocks?: unknown; faq?: unknown; }
 const plain = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
@@ -56,7 +62,7 @@ export function caseContentsIssues(draft: Draft): string[] {
     const stated = cells.join(' ').match(rarity)?.[1];
     if (stated && stated.toLowerCase() !== expected.toLowerCase()) issues.add(`CS20 rarity mismatch: ${name} must be ${expected}`);
   }
-  if (fullGuide && seen.size !== 17) issues.add('Complete CS20 contents table must contain the17 verified weapon finishes');
+  if (fullGuide && seen.size !== 17) issues.add('Complete CS20 contents table must contain the 17 verified weapon finishes');
   const all = plain([draft.body_html, draft.body_md, JSON.stringify(blocks), JSON.stringify(draft.faq)].join(' '));
   if (/cs20 case[^.!?]{0,80}(?:does not (?:include|contain)|contains no)[^.!?]{0,60}(?:kniv|special items)/i.test(all)) issues.add('CS20 has the Classic Knife as its rare special item');
   return [...issues];
