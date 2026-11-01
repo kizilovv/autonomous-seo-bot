@@ -1,3 +1,4 @@
+import { CASE_CONTENT_FACTS } from "../quality/case-contents.js";
 import { COMMERCIAL_FACTS } from "../quality/commercial-facts.js";
 // Structured blocks generator — produces validated BlogBlock[] in one LLM
 // call. Replaces the body_md/body_html flow when SEO_BOT_BLOG_BLOCKS_FORMAT=on.
@@ -29,6 +30,7 @@ Hard facts only:
   - Direct item-for-item swaps use Steam; monetary purchases settle through platform balance
   - Inventory, listing counts and prices change; use current supplied data or omit numbers
 ${COMMERCIAL_FACTS}
+${CASE_CONTENT_FACTS}
   - Trades execute via Steam's official trade system
 DO NOT invent features. Mention CSBoard 1-3 times across the whole post.
 `.trim();
