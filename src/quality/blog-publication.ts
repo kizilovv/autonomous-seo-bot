@@ -1,3 +1,4 @@
+import { blogMarkupIssues, blogBlockMarkupIssues } from './blog-markup.js';
 import { caseContentsIssues } from './case-contents.js';
 import { commercialClaimViolation } from './commercial-facts.js';
 import { blogReadabilityIssues } from './blog-readability.js';
@@ -75,7 +76,7 @@ export function blogPublicationIssues(draft: BlogContentForReview): string[] {
   const value = [draft.title, draft.meta_title, draft.meta_description, draft.excerpt,
     draft.body_html, draft.body_md, typeof draft.faq === 'string' ? draft.faq : JSON.stringify(draft.faq),
     typeof draft.body_blocks === 'string' ? draft.body_blocks : JSON.stringify(draft.body_blocks)].filter(Boolean).join('\n');
-  const issues = [...blogReadabilityIssues(draft.body_html), ...productCapabilityIssues(value), ...anonymousComparisonIssues(draft), ...caseContentsIssues(draft)];
+  const issues = [...blogMarkupIssues(draft.body_html), ...blogBlockMarkupIssues(draft.body_blocks), ...blogReadabilityIssues(draft.body_html), ...productCapabilityIssues(value), ...anonymousComparisonIssues(draft), ...caseContentsIssues(draft)];
   const commercial = commercialClaimViolation(value, 'editorial');
   if (commercial) issues.push(commercial);
   return [...new Set(issues)];
