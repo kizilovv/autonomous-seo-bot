@@ -1,3 +1,4 @@
+import { commercialLandingForQuery } from "./commercial-intent.js";
 /** Search queries are untrusted evidence, never instructions for the writer. */
 export function queryEligibilityIssue(query: string | null | undefined): string | null {
   if (!query) return null;
@@ -15,6 +16,8 @@ export function queryEligibilityIssue(query: string | null | undefined): string 
 export function blogTopicEligibilityIssue(query: string): string | null {
   const issue = queryEligibilityIssue(query);
   if (issue) return issue;
+  const landing = commercialLandingForQuery(query);
+  if (landing) return `transactional query belongs to existing ${landing} landing; improve that page instead of generating another blog`;
   if (/\bcs\s*:?\s*go\s*atse\b/iu.test(query)) {
     return 'CSGOATSE entity needs a verified source brief before automated drafting';
   }

@@ -1,3 +1,4 @@
+import { commercialLandingForQuery } from "../quality/commercial-intent.js";
 import { blogPublicationIssues } from "../quality/blog-publication.js";
 import { blogTopicEligibilityIssue } from "../quality/query-eligibility.js";
 // Blog generator worker.
@@ -189,6 +190,8 @@ function cannibalisationSkipReason(c: Cluster): string | null {
 const MAX_TOPICS_PER_RUN_BY_LOCALE: Record<"en" | "ru", number> = { en: 5, ru: 5 };
 
 interface Stats {
+  commercial_queries_excluded: number;
+  commercial_queued_skipped: number;
   topics_detected: number;
   topics_skipped: number;
   topics_cannibal_skipped: number;
@@ -200,11 +203,16 @@ interface Stats {
 
 export async function runBlogGenerator() {
   const id = startRun("blog-generator");
-  const stats: Stats = { topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, total_cost_usd: 0, budget_stopped: false };
+  const stats: Stats = { commercial_queries_excluded: 0, commercial_queued_skipped: 0, topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, total_cost_usd: 0, budget_stopped: false };
   try {
     // ---------- Phase A: detect topics ----------
+    const excludedCommercialQueries = new Set<string>();
     for (const site of gscSites()) {
       const rows = aggregateQueries(site, offsetDate(28), offsetDate(1));
+      for (const row of rows) {
+        if (commercialLandingForQuery(row.query)) excludedCommercialQueries.add(row.query.toLowerCase().trim());
+      }
+      stats.commercial_queries_excluded = excludedCommercialQueries.size;
       const clusters = buildClusters(rows as QueryRow[]);
       for (const c of clusters) {
         if (c.totalImpressions < MIN_CLUSTER_IMPS_BY_LOCALE[c.locale]) continue;
@@ -252,6 +260,7 @@ export async function runBlogGenerator() {
       const cluster_queries: string[] = topic.cluster_queries ? JSON.parse(topic.cluster_queries) : [];
       const eligibility = [topic.primary_query, ...cluster_queries].map(blogTopicEligibilityIssue).find(Boolean);
       if (eligibility) {
+        if ([topic.primary_query, ...cluster_queries].some(q => commercialLandingForQuery(q))) stats.commercial_queued_skipped++;
         markTopicStatus(topic.id, "skipped");
         stats.topics_skipped++;
         logger.info({ topicId: topic.id, reason: eligibility }, "blog topic skipped before paid generation");
