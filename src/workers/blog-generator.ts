@@ -191,28 +191,35 @@ const MAX_TOPICS_PER_RUN_BY_LOCALE: Record<"en" | "ru", number> = { en: 5, ru: 5
 
 interface Stats {
   commercial_queries_excluded: number;
+  editorial_queries_excluded: number;
   commercial_queued_skipped: number;
   topics_detected: number;
   topics_skipped: number;
   topics_cannibal_skipped: number;
   blogs_generated: number;
   blogs_failed: number;
+  blogs_rejected: number;
+  rejected: Array<{ id: number; query: string; issues: string[] }>;
   total_cost_usd: number;
   budget_stopped: boolean;
 }
 
 export async function runBlogGenerator() {
   const id = startRun("blog-generator");
-  const stats: Stats = { commercial_queries_excluded: 0, commercial_queued_skipped: 0, topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, total_cost_usd: 0, budget_stopped: false };
+  const stats: Stats = { commercial_queries_excluded: 0, editorial_queries_excluded: 0, commercial_queued_skipped: 0, topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, blogs_rejected: 0, rejected: [], total_cost_usd: 0, budget_stopped: false };
+  const reviewQueue: Array<{id: number; title: string; query: string}> = [];
   try {
     // ---------- Phase A: detect topics ----------
     const excludedCommercialQueries = new Set<string>();
+    const excludedEditorialQueries = new Set<string>();
     for (const site of gscSites()) {
       const rows = aggregateQueries(site, offsetDate(28), offsetDate(1));
       for (const row of rows) {
         if (commercialLandingForQuery(row.query)) excludedCommercialQueries.add(row.query.toLowerCase().trim());
+        else if (blogTopicEligibilityIssue(row.query)) excludedEditorialQueries.add(row.query.toLowerCase().trim());
       }
       stats.commercial_queries_excluded = excludedCommercialQueries.size;
+      stats.editorial_queries_excluded = excludedEditorialQueries.size;
       const clusters = buildClusters(rows as QueryRow[]);
       for (const c of clusters) {
         if (c.totalImpressions < MIN_CLUSTER_IMPS_BY_LOCALE[c.locale]) continue;
@@ -239,14 +246,21 @@ export async function runBlogGenerator() {
     }
 
     // ---------- Phase B: generate up to N queued topics ----------
-    // Re-queue any 'skipped' topics older than 6h so we get to retry once.
-    const reset = await import("../db/connection.js");
-    reset.getDb()
-      .prepare("UPDATE blog_topics SET status='queued' WHERE status='skipped' AND detected_at < datetime('now','-6 hours')")
-      .run();
-
+    // Rejections remain terminal until an explicit editorial requeue. Previously
+    // every old skipped topic was reset on every run, including quality failures.
     // Pull RU and EN topics separately so EN can't dominate the run cap.
-    const allQueued = nextQueuedTopics(50);
+    const allQueued = nextQueuedTopics(50).filter(topic => {
+      const cluster_queries: string[] = topic.cluster_queries ? JSON.parse(topic.cluster_queries) : [];
+      const eligibility = [topic.primary_query, ...cluster_queries].map(blogTopicEligibilityIssue).find(Boolean);
+      if (eligibility) {
+        if ([topic.primary_query, ...cluster_queries].some(q => commercialLandingForQuery(q))) stats.commercial_queued_skipped++;
+        markTopicStatus(topic.id, "skipped");
+        stats.topics_skipped++;
+        logger.info({ topicId: topic.id, reason: eligibility }, "blog topic skipped before paid generation");
+        return false;
+      }
+      return true;
+    });
     const ruQueue = allQueued.filter((t) => t.locale === "ru").slice(0, MAX_TOPICS_PER_RUN_BY_LOCALE.ru);
     const enQueue = allQueued.filter((t) => t.locale === "en").slice(0, MAX_TOPICS_PER_RUN_BY_LOCALE.en);
     // Interleave so a budget cap doesn't starve one locale.
@@ -258,14 +272,6 @@ export async function runBlogGenerator() {
     }
     for (const topic of queue) {
       const cluster_queries: string[] = topic.cluster_queries ? JSON.parse(topic.cluster_queries) : [];
-      const eligibility = [topic.primary_query, ...cluster_queries].map(blogTopicEligibilityIssue).find(Boolean);
-      if (eligibility) {
-        if ([topic.primary_query, ...cluster_queries].some(q => commercialLandingForQuery(q))) stats.commercial_queued_skipped++;
-        markTopicStatus(topic.id, "skipped");
-        stats.topics_skipped++;
-        logger.info({ topicId: topic.id, reason: eligibility }, "blog topic skipped before paid generation");
-        continue;
-      }
       const b = budgetExceeded();
       if (!b.ok) {
         stats.budget_stopped = true;
@@ -338,9 +344,9 @@ export async function runBlogGenerator() {
           if (body_blocks) body_blocks = [...body_blocks, { type: "text", html: htmlSection }];
         }
 
-        const readabilityIssues = blogPublicationIssues({ ...draft, body_html, body_md, body_blocks });
+        const readabilityIssues = blogPublicationIssues({ ...draft, body_html, body_md, body_blocks, primary_query: topic.primary_query, secondary_queries: cluster_queries });
         const requiresApproval = BLOG_APPROVAL_ENABLED || readabilityIssues.length > 0;
-        if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog held for readability review");
+        if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog automatically rejected by editorial checks");
         const blogId = insertBlog({
           ...draft,
           body_md,
@@ -360,7 +366,14 @@ export async function runBlogGenerator() {
           // Legacy genBlogPost() drafts have no body_blocks → column stays NULL,
           // FE falls back to body_html rendering as before.
           body_blocks,
-        }, requiresApproval ? "pending_approval" : "published");
+        }, readabilityIssues.length ? "retired" : requiresApproval ? "pending_approval" : "published");
+        if (readabilityIssues.length) {
+          markTopicStatus(topic.id, "skipped", blogId);
+          stats.blogs_rejected++;
+          stats.total_cost_usd += draft.cost_usd;
+          stats.rejected.push({id: blogId, query: topic.primary_query, issues: readabilityIssues});
+          continue;
+        }
         markTopicStatus(topic.id, "generated", blogId);
         stats.blogs_generated++;
         stats.total_cost_usd += draft.cost_usd;
@@ -368,11 +381,8 @@ export async function runBlogGenerator() {
           { id: blogId, slug, locale: topic.locale, words: draft.word_count, cost: draft.cost_usd.toFixed(4) },
           "blog generated"
         );
-        await sendMessage(
-          requiresApproval
-            ? `📝 Blog PENDING APPROVAL · #${blogId}\n<b>${esc(draft.title)}</b>\n<code>${esc(topic.locale)}</code>/<code>${esc(slug)}</code>\n${draft.word_count} words · $${draft.cost_usd.toFixed(4)} · ${esc(draft.source_model)}\n✅ approve: <code>POST /v1/blog/${blogId}/approve</code> · ❌ <code>/reject</code>`
-            : `📝 New blog post auto-published\n<b>${esc(draft.title)}</b>\n<code>${esc(topic.locale)}</code>/<code>${esc(slug)}</code>\n${draft.word_count} words · $${draft.cost_usd.toFixed(4)} · model ${esc(draft.source_model)}`
-        );
+        if (requiresApproval) reviewQueue.push({id: blogId, title: draft.title, query: topic.primary_query});
+
       } catch (e) {
         stats.blogs_failed++;
         markTopicStatus(topic.id, "skipped");
@@ -380,6 +390,11 @@ export async function runBlogGenerator() {
       }
     }
 
+    if (reviewQueue.length) {
+      await sendMessage(`Blog review: ${reviewQueue.length} drafts passed automated checks, publication is still held.\n`
+        + reviewQueue.slice(0, 5).map(r => `#${r.id} <b>${esc(r.title.slice(0, 60))}</b>\nSearch intent: <code>${esc(r.query.slice(0, 40))}</code>`).join('\n\n')
+        + `\nAutomatic checks do not prove every fact. Rejected drafts: ${stats.blogs_rejected}; reasons saved in the run log.`);
+    }
     finishRun(id, stats);
     return stats;
   } catch (e) {

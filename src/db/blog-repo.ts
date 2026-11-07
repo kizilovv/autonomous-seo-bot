@@ -110,7 +110,7 @@ export interface InsertBlogArgs {
   body_blocks?: unknown;
 }
 
-export function insertBlog(args: InsertBlogArgs, status: "published" | "pending_approval" = "published"): number {
+export function insertBlog(args: InsertBlogArgs, status: "published" | "pending_approval" | "retired" = "published"): number {
   const db = getDb();
   // pending_approval blogs stay unpublished (published_at NULL) until an operator
   // approves; getBlogBySlug/listPublishedBlogs filter status='published', so they
