@@ -9,6 +9,7 @@ import { callLlm } from "../llm/openrouter.js";
 import { logger } from "../logger.js";
 
 export interface BlogTopicInput {
+  evidence_brief?: string;
   primary_query: string;
   locale: "en" | "ru";
   cluster_queries: string[];
@@ -106,7 +107,7 @@ function repairTruncatedJson(s: string): string {
 
 // Lightweight markdown → HTML for the bot's own output.
 // We control the prompt format, so we don't need a full MD parser.
-function mdToHtml(md: string): string {
+export function mdToHtml(md: string): string {
   const lines = md.split(/\r?\n/);
   const out: string[] = [];
   let inUl = false;
@@ -121,7 +122,8 @@ function mdToHtml(md: string): string {
     return escapeHtml(s)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.+?)\*/g, "<em>$1</em>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\[([^\]]+)\]\((\/[a-z0-9/-]+|https:\/\/csboard\.com\/[a-z0-9/-]+)\)/gi, '<a href="$2">$1</a>');
   }
 
   function cells(row: string): string[] {
@@ -184,6 +186,7 @@ export async function genBlogPost(topic: BlogTopicInput): Promise<BlogDraft> {
 
   const sys = `${BRAND}
 ${caseContentFactsForQuery(topic.primary_query)}
+${topic.evidence_brief ?? "No verified source brief: do not invent factual details."}
 
 You are writing a single SEO blog post for CSBoard.
 ${FORBIDDEN_PHRASES_NOTE}
@@ -196,18 +199,17 @@ Output STRICT JSON (no markdown wrapper, no surrounding code fences) matching th
   "excerpt": string,                  // 1-2 sentence preview (140-220 chars)
   "category": string,                 // one of: "Trading Guide" | "Market Analysis" | "Knife Guide" | "Skin Guide" | "Investment"
   "tags": string[],                   // 4-7 lowercase tags
-  "body_md": string,                  // 1200-1800 word body in Markdown (## headings, ### subheadings, lists)
+  "body_md": string,                  // concise, useful body in Markdown; no padding (## headings, ### subheadings, lists)
   "faq": [{"q": string, "a": string}, ...]  // 4-5 FAQ items, each q 50-100 chars, a 200-340 chars
 }
 
 Body rules:
-- Open with 80-150 word intro that names the primary query in the first sentence.
-- 4-6 ## sections, each 200-400 words. Use ### subheadings inside long sections.
-- Include 2-3 specific data points (real prices, real float values, named skins like "AK-47 | Redline" / "M9 Bayonet | Tiger Tooth").
+- Open with a direct answer to the buying/selling decision. No generic introduction.
+- Use only sections needed to answer the question. No word-count targets.
+- Use specific facts ONLY from the supplied evidence; omit unsupported prices and item attributes. Include a useful decision checklist and a link to the matching buy/sell page.
 - Mention CSBoard 1-3 times across the whole post, only where it adds value (and obey the NEUTRALITY RULE above for comparison posts).
 - Compare to known competitors when relevant (Buff163, CSFloat, Skinport, DMarket, Tradeit) — accurate, factual.
-- COMPARISON TABLE: if the primary query contains "comparison", "vs", "best sites", "best platforms", or names 2+ platforms, you MUST include at least one Markdown table comparing the platforms side by side. Use GitHub-flavored Markdown table syntax (header row, a |---|---| separator row, then data rows). Suggested columns: | Platform | Trading fee | Payout method | Payout speed | Best for |. Populate every cell with a factual value; omitting the table is a generation failure.
-- End with a "## Conclusion" section (80-150 words) that gives the reader a clear next step — for comparison posts keep it neutral ("compare the platforms above against your priorities"), do not hard-sell one platform.
+- Compare only facts supported by the brief; do not invent competitor fees or features. End with a concrete next step, no generic conclusion.
 - Output language: ${lang}. ALL fields in ${lang}.
 
 You may use <em> implicitly via Markdown (*foo*, **bar**, \`code\`) but no HTML tags directly.`;
@@ -257,7 +259,7 @@ Write the post now. Output ONLY the JSON envelope, nothing else.`;
 
   // Sanity gates
   const wc = countWords(env.body_md);
-  if (wc < 800) throw new Error(`blog too short: ${wc} words`);
+  if (wc < 200) throw new Error(`blog too short: ${wc} words`);
   if (!env.title || !env.meta_title || !env.meta_description) throw new Error("blog: required envelope fields missing");
   if (!Array.isArray(env.faq) || env.faq.length < 3) throw new Error(`blog: faq too short (${env.faq?.length ?? 0})`);
 

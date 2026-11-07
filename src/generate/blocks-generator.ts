@@ -391,6 +391,7 @@ export async function genBlogPostBlocks(topic: BlogTopicInput, opts?: { csboardA
 
   const sys = `${BRAND_FACTS}
 ${caseContentFactsForQuery(topic.primary_query)}
+${topic.evidence_brief ?? "No verified source brief: do not invent factual details."}
 
 You are writing a single SEO blog post for CSBoard in structured-block format.
 ${FORBIDDEN}
@@ -421,7 +422,7 @@ not the topic:
 
 ${EXAMPLE}
 
-Output ONLY the JSON array. No prose, no fences, no surrounding object.`;
+Output ONLY the JSON object with the blocks array. No prose or fences.`;
 
   const user = `Primary search query: "${topic.primary_query}"
 Related queries this post should also rank for (use them naturally):

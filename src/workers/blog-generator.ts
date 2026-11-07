@@ -1,6 +1,7 @@
+import {reviewPendingRetailBlogs,existingRetailPages} from "./blog-auto-review.js";
+import {collectEvidence, evidencePrompt, retailTopicIssue, reviewRetailDraft} from "../quality/retail-editor.js";
+import {getDb, tx} from "../db/connection.js";
 import { commercialLandingForQuery } from "../quality/commercial-intent.js";
-import { blogPublicationIssues } from "../quality/blog-publication.js";
-import { blogTopicEligibilityIssue } from "../quality/query-eligibility.js";
 // Blog generator worker.
 // Two phases:
 //   A) Topic detection — group GSC queries into clusters with shared intent,
@@ -20,14 +21,10 @@ import { genBlogPostBlocks, type BlogBlocksDraft } from "../generate/blocks-gene
 // frontend). Falls back to legacy body_md/body_html generator on any block
 // generator failure — so a flaky LLM can't take down the daily pipeline.
 const BLOCKS_FORMAT_ENABLED = process.env.SEO_BOT_BLOG_BLOCKS_FORMAT === "on";
-// Toggle: when SEO_BOT_BLOG_APPROVAL=on, generated blogs land as `pending_approval`
-// (not auto-published) and surface for operator ✅/❌ instead of going live blind —
-// the content-brain blog approval gate, mirroring the email-campaign approval flow.
-const BLOG_APPROVAL_ENABLED = process.env.SEO_BOT_BLOG_APPROVAL === "on";
 import { budgetExceeded } from "../llm/openrouter.js";
 import { gscSites } from "../config.js";
 import { logger } from "../logger.js";
-import { sendMessage, esc } from "../notify/telegram.js";
+
 
 const CSBOARD_BRAND_RE = /csboard|cs ?board|cstrade|csboardtrade/i;
 
@@ -91,7 +88,7 @@ interface Cluster {
 function buildClusters(rows: QueryRow[]): Cluster[] {
   // Filter brand + tiny queries + Google search-operator junk
   const filtered = rows.filter(
-    (r) => !CSBOARD_BRAND_RE.test(r.query) && !blogTopicEligibilityIssue(r.query) && r.impressions >= 5
+    (r) => !CSBOARD_BRAND_RE.test(r.query) && !retailTopicIssue(r.query) && r.impressions >= 5
   );
   // Sort by impressions desc — biggest queries seed clusters
   filtered.sort((a, b) => b.impressions - a.impressions);
@@ -187,9 +184,10 @@ function cannibalisationSkipReason(c: Cluster): string | null {
   return null;
 }
 // Per-run topic generation cap. RU gets its own slot count so EN can't starve it.
-const MAX_TOPICS_PER_RUN_BY_LOCALE: Record<"en" | "ru", number> = { en: 5, ru: 5 };
+const MAX_TOPICS_PER_RUN_BY_LOCALE: Record<"en" | "ru", number> = { en: 1, ru: 1 };
 
 interface Stats {
+  pending_review?: Awaited<ReturnType<typeof reviewPendingRetailBlogs>>;
   commercial_queries_excluded: number;
   editorial_queries_excluded: number;
   commercial_queued_skipped: number;
@@ -207,8 +205,10 @@ interface Stats {
 export async function runBlogGenerator() {
   const id = startRun("blog-generator");
   const stats: Stats = { commercial_queries_excluded: 0, editorial_queries_excluded: 0, commercial_queued_skipped: 0, topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, blogs_rejected: 0, rejected: [], total_cost_usd: 0, budget_stopped: false };
-  const reviewQueue: Array<{id: number; title: string; query: string}> = [];
+
   try {
+    stats.pending_review = await reviewPendingRetailBlogs();
+    stats.total_cost_usd += stats.pending_review.cost_usd;
     // ---------- Phase A: detect topics ----------
     const excludedCommercialQueries = new Set<string>();
     const excludedEditorialQueries = new Set<string>();
@@ -216,7 +216,7 @@ export async function runBlogGenerator() {
       const rows = aggregateQueries(site, offsetDate(28), offsetDate(1));
       for (const row of rows) {
         if (commercialLandingForQuery(row.query)) excludedCommercialQueries.add(row.query.toLowerCase().trim());
-        else if (blogTopicEligibilityIssue(row.query)) excludedEditorialQueries.add(row.query.toLowerCase().trim());
+        else if (retailTopicIssue(row.query)) excludedEditorialQueries.add(row.query.toLowerCase().trim());
       }
       stats.commercial_queries_excluded = excludedCommercialQueries.size;
       stats.editorial_queries_excluded = excludedEditorialQueries.size;
@@ -251,7 +251,7 @@ export async function runBlogGenerator() {
     // Pull RU and EN topics separately so EN can't dominate the run cap.
     const allQueued = nextQueuedTopics(50).filter(topic => {
       const cluster_queries: string[] = topic.cluster_queries ? JSON.parse(topic.cluster_queries) : [];
-      const eligibility = [topic.primary_query, ...cluster_queries].map(blogTopicEligibilityIssue).find(Boolean);
+      const eligibility = [topic.primary_query, ...cluster_queries].map(retailTopicIssue).find(Boolean);
       if (eligibility) {
         if ([topic.primary_query, ...cluster_queries].some(q => commercialLandingForQuery(q))) stats.commercial_queued_skipped++;
         markTopicStatus(topic.id, "skipped");
@@ -280,7 +280,9 @@ export async function runBlogGenerator() {
       }
       try {
         markTopicStatus(topic.id, "generating");
+        const sources = await collectEvidence(topic.locale);
         const topicInput = {
+          evidence_brief: evidencePrompt(sources),
           primary_query: topic.primary_query,
           locale: topic.locale as "en" | "ru",
           cluster_queries,
@@ -344,10 +346,12 @@ export async function runBlogGenerator() {
           if (body_blocks) body_blocks = [...body_blocks, { type: "text", html: htmlSection }];
         }
 
-        const readabilityIssues = blogPublicationIssues({ ...draft, body_html, body_md, body_blocks, primary_query: topic.primary_query, secondary_queries: cluster_queries });
-        const requiresApproval = BLOG_APPROVAL_ENABLED || readabilityIssues.length > 0;
-        if (readabilityIssues.length) logger.warn({ slug, readabilityIssues }, "blog automatically rejected by editorial checks");
-        const blogId = insertBlog({
+        const reviewDraft = {...draft, body_html, body_md, body_blocks, primary_query:topic.primary_query, secondary_queries:cluster_queries};
+        const existing = existingRetailPages(topic.locale);
+        const review = await reviewRetailDraft(reviewDraft, sources, existing);
+        const readabilityIssues = review.issues;
+        const blogId = tx(() => {
+          const newId = insertBlog({
           ...draft,
           body_md,
           body_html,
@@ -366,22 +370,25 @@ export async function runBlogGenerator() {
           // Legacy genBlogPost() drafts have no body_blocks → column stays NULL,
           // FE falls back to body_html rendering as before.
           body_blocks,
-        }, readabilityIssues.length ? "retired" : requiresApproval ? "pending_approval" : "published");
+        }, readabilityIssues.length ? "retired" : "published");
+          getDb().prepare("INSERT INTO blog_editorial_reviews(blog_id,decision,review_json) VALUES (?,?,?)").run(newId,review.decision,JSON.stringify(review));
+          return newId;
+        });
         if (readabilityIssues.length) {
           markTopicStatus(topic.id, "skipped", blogId);
           stats.blogs_rejected++;
-          stats.total_cost_usd += draft.cost_usd;
+          stats.total_cost_usd += draft.cost_usd + review.cost_usd;
           stats.rejected.push({id: blogId, query: topic.primary_query, issues: readabilityIssues});
           continue;
         }
         markTopicStatus(topic.id, "generated", blogId);
         stats.blogs_generated++;
-        stats.total_cost_usd += draft.cost_usd;
+        stats.total_cost_usd += draft.cost_usd + review.cost_usd;
         logger.info(
           { id: blogId, slug, locale: topic.locale, words: draft.word_count, cost: draft.cost_usd.toFixed(4) },
           "blog generated"
         );
-        if (requiresApproval) reviewQueue.push({id: blogId, title: draft.title, query: topic.primary_query});
+
 
       } catch (e) {
         stats.blogs_failed++;
@@ -390,11 +397,6 @@ export async function runBlogGenerator() {
       }
     }
 
-    if (reviewQueue.length) {
-      await sendMessage(`Blog review: ${reviewQueue.length} drafts passed automated checks, publication is still held.\n`
-        + reviewQueue.slice(0, 5).map(r => `#${r.id} <b>${esc(r.title.slice(0, 60))}</b>\nSearch intent: <code>${esc(r.query.slice(0, 40))}</code>`).join('\n\n')
-        + `\nAutomatic checks do not prove every fact. Rejected drafts: ${stats.blogs_rejected}; reasons saved in the run log.`);
-    }
     finishRun(id, stats);
     return stats;
   } catch (e) {
