@@ -1,3 +1,4 @@
+import { loadCheckpoint, saveCheckpoint } from "../dataforseo/checkpoint.js";
 // DataForSEO competitor-gap worker.
 //
 // Runs daily 09:00 UTC. Each run:
@@ -250,21 +251,36 @@ export async function runDataForSeoPull(opts?: { competitor?: string; refreshOwn
   };
 
   try {
-    // 1) Own domain — pulled every run so the diff is always against fresh data.
-    //    Cheap (~$0.03). Skip via opts.refreshOwn=false only in tests.
+    // Resume only failed same-day pulls with identical request parameters.
+    // Successful paid stages survive a later API failure; completed daily runs
+    // still fetch fresh data. No schema change: failRun preserves runs.stats.
+    const checkpointKey = JSON.stringify(["v1", new Date().toISOString().slice(0,10), config.DATAFORSEO_OWN_DOMAIN, competitor, 2840, "en", 200, 50, 500, 100]);
+    const checkpoint = opts?.refreshOwn === false ? {} : loadCheckpoint(getDb(), checkpointKey);
+    const persist = () => { if (opts?.refreshOwn !== false) saveCheckpoint(getDb(), runId, checkpointKey, checkpoint); };
+    persist();
     let ownItems: RankedKeywordItem[] = [];
     if (opts?.refreshOwn !== false) {
-      const own = await rankedKeywords({ target: config.DATAFORSEO_OWN_DOMAIN, limit: 200, minVolume: 50 });
-      ownItems = own.items;
-      result.cost_usd += own.cost;
+      if (checkpoint.own !== undefined) {
+        ownItems = checkpoint.own;
+        result.notes = "resumed own-domain snapshot from failed pull";
+      } else {
+        const own = await rankedKeywords({ target: config.DATAFORSEO_OWN_DOMAIN, limit: 200, minVolume: 50 });
+        ownItems = own.items;
+        result.cost_usd += own.cost;
+        checkpoint.own = ownItems;
+        persist();
+      }
       result.csboard_kw_count = ownItems.length;
     }
     const ownSet = new Set(ownItems.map((i) => i.keyword.toLowerCase()));
 
-    // 2) Competitor — top 500 by volume, vol>=100.
-    const comp = await rankedKeywords({ target: competitor, limit: 500, minVolume: 100 });
+    const comp = checkpoint.competitor !== undefined
+      ? { items: checkpoint.competitor, cost: 0 }
+      : await rankedKeywords({ target: competitor, limit: 500, minVolume: 100 });
     result.cost_usd += comp.cost;
     result.competitor_kw_count = comp.items.length;
+    checkpoint.competitor = comp.items;
+    persist();
 
     // 3) Compute gap
     const rawGap = comp.items.filter((it) => !ownSet.has(it.keyword.toLowerCase()));
