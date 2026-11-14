@@ -20,24 +20,12 @@ import { getDb } from "../db/connection.js";
 import { logger } from "../logger.js";
 import { config } from "../config.js";
 
+import { requestWithRetry, type DfsEnvelope } from "./retry.js";
+
 const API_BASE = "https://api.dataforseo.com/v3";
 
 export class BudgetCappedError extends Error {
   constructor(msg: string) { super(msg); this.name = "BudgetCappedError"; }
-}
-
-interface DfsTaskBase {
-  status_code: number;
-  status_message: string;
-  cost: number;
-  result?: any;
-}
-
-interface DfsEnvelope {
-  status_code: number;
-  status_message: string;
-  cost: number;
-  tasks?: DfsTaskBase[];
 }
 
 /** Returns today's spend in USD (sum of all DFS calls today). */
@@ -88,23 +76,18 @@ async function postRaw(endpoint: string, body: unknown, estimatedMaxCost: number
   if (!config.DATAFORSEO_USERNAME || !config.DATAFORSEO_PASSWORD) {
     throw new Error("DataForSEO credentials missing — set DATAFORSEO_USERNAME and DATAFORSEO_PASSWORD");
   }
-  preflightBudget(estimatedMaxCost);
   const auth = Buffer.from(`${config.DATAFORSEO_USERNAME}:${config.DATAFORSEO_PASSWORD}`).toString("base64");
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
+  return requestWithRetry({
+    beforeAttempt: () => preflightBudget(estimatedMaxCost),
+    recordSpend,
+    onRetry: (info) => logger.warn({ endpoint, ...info }, "DataForSEO transient failure; retrying without alert"),
+    request: () => fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    }),
   });
-  if (!res.ok) {
-    throw new Error(`DataForSEO HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
-  const json = (await res.json()) as DfsEnvelope;
-  recordSpend(json.cost || 0);
-  if (json.status_code !== 20000) {
-    throw new Error(`DataForSEO error ${json.status_code}: ${json.status_message}`);
-  }
-  return json;
 }
 
 // ---------- ranked_keywords ----------
