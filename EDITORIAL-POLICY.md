@@ -42,3 +42,10 @@ per run, while existing daily/monthly spend caps remain unchanged.
 Checks: npm run build; npm test. The live canary uses a fabricated fee, a supported
 buy/sell comparison and a duplicate-intent draft, with no publication. Rollout
 must preserve published rows and human CMS edits; check deployed SHA and health.
+
+## Evidence collection and outcome counters (2026-11-17)
+- Public `/en|ru/buy` and `/en|ru/sell` remain fixed first-party sources. Parse HTML; resolve only completed React segments explicitly attached to the main content. Never execute JavaScript or use Flight JSON, metadata, unrelated hidden text, or Trustpilot testimonials as product evidence.
+- Incomplete/client-only boundaries, missing main, oversized responses and unsupported locales still fail closed. Existing minimum/maximum evidence size and claim-by-claim checks remain mandatory. New collection version: `retail-evidence-v2-streamed`.
+- An unavailable source leaves the topic queued for the next existing scheduled run. `blogs_evidence_deferred` counts the attempted topic; the batch stops before paid generation. It is not a quality approval or technical LLM failure.
+- Snippet `quality_rejected` counts successful generations refused by the quality gate. `failed` counts generation exceptions. Rejected generation cost still stays in the cost total.
+- Ranking and CTR regressions compare the same site, query and exact page URL across windows. Another page's previous position or clicks must never justify a rewrite. Keep existing historical records; do not rewrite old metrics to make this fix look like traffic growth.

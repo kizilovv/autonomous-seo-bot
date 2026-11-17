@@ -112,10 +112,11 @@ export async function classifyAllSites(args: {
       const avgPos = t.posWeighted / t.impressions;
       return t.clicks / t.impressions >= expectedCtrFor(avgPos);
     };
-    // Build a query→aggregate map for prev window if provided
+    // Compare the same query AND URL; another page is not this page's baseline.
     const prev = args.prevSince && args.prevUntil ? aggregateQueries(site, args.prevSince, args.prevUntil) : [];
-    const prevByQuery = new Map<string, (typeof prev)[number]>();
-    for (const r of prev) prevByQuery.set(r.query, r);
+    const comparisonKey = (row: (typeof prev)[number]) => JSON.stringify([row.query, row.page]);
+    const prevByPageQuery = new Map<string, (typeof prev)[number]>();
+    for (const r of prev) prevByPageQuery.set(comparisonKey(r), r);
 
     for (const r of curr) {
       if ((r.impressions || 0) < MIN_IMPRESSIONS_FOR_DETECTION) continue;
@@ -222,8 +223,8 @@ export async function classifyAllSites(args: {
       }
 
       // ---------- ctr_regression (same position, fewer clicks) ----------
-      if (pos <= 10 && prevByQuery.has(r.query)) {
-        const p = prevByQuery.get(r.query)!;
+      if (pos <= 10 && prevByPageQuery.has(comparisonKey(r))) {
+        const p = prevByPageQuery.get(comparisonKey(r))!;
         const positionDelta = Math.abs(pos - p.position);
         const clickDrop = p.clicks > 0 ? (p.clicks - r.clicks) / p.clicks : 0;
         const regShare = (pageTotals.get(r.page)?.impressions ?? r.impressions) > 0
@@ -250,8 +251,8 @@ export async function classifyAllSites(args: {
       }
 
       // ---------- lost_ranking (was top-10, now >30) ----------
-      if (pos > 30 && prevByQuery.has(r.query)) {
-        const p = prevByQuery.get(r.query)!;
+      if (pos > 30 && prevByPageQuery.has(comparisonKey(r))) {
+        const p = prevByPageQuery.get(comparisonKey(r))!;
         if (p.position <= 10 && r.impressions >= 5) {
           insertOpportunity({
             kind: "lost_ranking",
