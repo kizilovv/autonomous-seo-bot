@@ -16,6 +16,7 @@ interface GenerateStats {
   generated: number;
   cached: number;
   failed: number;
+  quality_rejected: number;
   total_cost_usd: number;
   budget_stopped: boolean;
 }
@@ -83,7 +84,7 @@ async function generateOne(opp: OpportunityRow & { id: number }) {
 
 export async function runGenerate(): Promise<GenerateStats> {
   const id = startRun("generate");
-  const stats: GenerateStats = { generated: 0, cached: 0, failed: 0, total_cost_usd: 0, budget_stopped: false };
+  const stats: GenerateStats = { generated: 0, cached: 0, failed: 0, quality_rejected: 0, total_cost_usd: 0, budget_stopped: false };
   try {
     const queue = pendingOpportunitiesNeedingProposal(PER_RUN_LIMIT);
 
@@ -175,7 +176,7 @@ export async function runGenerate(): Promise<GenerateStats> {
         if (opp.field === "faq") {
           const gate = runGateForFaqItem(value as { q: string; a: string }, opp.query, opp.locale as "en" | "ru", opp.path);
           if (!gate.ok) {
-            stats.failed++;
+            stats.quality_rejected++;
             rejectOpportunity(opp.id, `quality-gate: ${gate.reason}`);
             continue;
           }
@@ -189,7 +190,7 @@ export async function runGenerate(): Promise<GenerateStats> {
             path: opp.path,
           });
           if (!gate.ok) {
-            stats.failed++;
+            stats.quality_rejected++;
             rejectOpportunity(opp.id, `quality-gate: ${gate.reason}`);
             continue;
           }

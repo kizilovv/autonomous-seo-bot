@@ -196,6 +196,7 @@ interface Stats {
   topics_cannibal_skipped: number;
   blogs_generated: number;
   blogs_failed: number;
+  blogs_evidence_deferred: number;
   blogs_rejected: number;
   rejected: Array<{ id: number; query: string; issues: string[] }>;
   total_cost_usd: number;
@@ -204,7 +205,7 @@ interface Stats {
 
 export async function runBlogGenerator() {
   const id = startRun("blog-generator");
-  const stats: Stats = { commercial_queries_excluded: 0, editorial_queries_excluded: 0, commercial_queued_skipped: 0, topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, blogs_rejected: 0, rejected: [], total_cost_usd: 0, budget_stopped: false };
+  const stats: Stats = { commercial_queries_excluded: 0, editorial_queries_excluded: 0, commercial_queued_skipped: 0, topics_detected: 0, topics_skipped: 0, topics_cannibal_skipped: 0, blogs_generated: 0, blogs_failed: 0, blogs_evidence_deferred: 0, blogs_rejected: 0, rejected: [], total_cost_usd: 0, budget_stopped: false };
 
   try {
     stats.pending_review = await reviewPendingRetailBlogs();
@@ -278,9 +279,18 @@ export async function runBlogGenerator() {
         logger.warn({ reason: b.reason }, "blog-generator: budget cap hit");
         break;
       }
+      // Source availability is a precondition, not a rejected topic or LLM failure.
+      // Retry on the next existing schedule; never pay or publish without evidence.
+      let sources: Awaited<ReturnType<typeof collectEvidence>>;
+      try {
+        sources = await collectEvidence(topic.locale);
+      } catch (e) {
+        stats.blogs_evidence_deferred++;
+        logger.warn({ topic: topic.primary_query, err: (e as Error).message }, "blog evidence unavailable — topic remains queued");
+        break;
+      }
       try {
         markTopicStatus(topic.id, "generating");
-        const sources = await collectEvidence(topic.locale);
         const topicInput = {
           evidence_brief: evidencePrompt(sources),
           primary_query: topic.primary_query,

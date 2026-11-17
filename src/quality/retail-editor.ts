@@ -1,3 +1,4 @@
+import {serverEvidenceText} from './server-evidence.js';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import {callLlm} from '../llm/openrouter.js';
@@ -5,7 +6,7 @@ import {COMMERCIAL_FACTS} from './commercial-facts.js';
 import {blogPublicationIssues, type BlogContentForReview} from './blog-publication.js';
 import {blogTopicEligibilityIssue} from './query-eligibility.js';
 
-export const EDITOR_VERSION = 'retail-evidence-v1';
+export const EDITOR_VERSION = 'retail-evidence-v2-streamed';
 export type Evidence = {id:string; url:string; fetched_at:string; text:string; sha256:string};
 export function hash(value:unknown):string {return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 export function retailTopicIssue(query:string):string|null {
@@ -35,9 +36,7 @@ export async function collectEvidence(locale:string):Promise<Evidence[]> {
   const parts:Uint8Array[]=[];let size=0;
   try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>2_000_000)throw new Error('Evidence body too large');parts.push(value);}} finally {await reader.cancel();}
   const html=Buffer.concat(parts).toString('utf8');
-  const main=html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/iu)?.[1];
-  if(!main) throw new Error(`Missing server-rendered evidence main: ${route}`);
-  const text=visibleText(main);
+  const text=serverEvidenceText(html);
   if(text.length<300 || text.length>24000 || !/skin|скин/iu.test(text)) throw new Error(`Incomplete evidence: ${route}`);
   sources.push({id:route,url,fetched_at:new Date().toISOString(),text,sha256:hash(text)});
  }

@@ -48,3 +48,17 @@ test('queued unsafe topics are skipped without any paid calls or Telegram sends'
   assert.equal((db.prepare('SELECT count(*) n FROM generated_blogs').get() as any).n,0);
  } finally {globalThis.fetch=originalFetch;closeDb();}
 });
+
+test('unavailable evidence defers queued topics without paid calls or false generation failures',async()=>{
+ runMigrations();const originalFetch=globalThis.fetch;const requests:string[]=[];
+ globalThis.fetch=async(input)=>{requests.push(String(input));return new Response('unavailable',{status:503});};
+ try {
+  const db=getDb();
+  for(const q of ['how to compare cs2 skin prices','buy AK-47 skins with different wear'])db.prepare("INSERT INTO blog_topics(primary_query,locale,cluster_queries,total_impressions,avg_position,status) VALUES (?,?,?,?,?,?)").run(q,'en','[]',40,12,'queued');
+  const result=await runBlogGenerator();
+  assert.equal(result.blogs_evidence_deferred,1);assert.equal(result.blogs_failed,0);assert.equal(result.blogs_generated,0);assert.equal(result.total_cost_usd,0);
+  assert.deepEqual(requests,['https://csboard.com/en/buy']);
+  assert.equal((db.prepare("SELECT count(*) n FROM blog_topics WHERE status='queued'").get() as any).n,2);
+  assert.equal((db.prepare('SELECT count(*) n FROM generated_blogs').get() as any).n,0);
+ }finally{globalThis.fetch=originalFetch;closeDb();}
+});
