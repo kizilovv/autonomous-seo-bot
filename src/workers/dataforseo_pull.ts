@@ -119,6 +119,11 @@ const WEAPON_ALIASES: Record<string, string> = {
 export function suggestTargetPage(keyword: string): string | null {
   const k = keyword.toLowerCase().trim();
 
+  // Contracts and calculators do not list player exchange offers. Leave these
+  // as review-only gaps even when the query also names a weapon or marketplace.
+  if (/\btrade[\s-]*ups?\b/.test(k)) return null;
+
+
   // /weapons/<weapon>. An earlier pass sent these to /items/<weapon>, on the
   // belief that it was the catalog view with a buy button. It is not: /items/
   // is the ITEM route, and a bare weapon slug fuzzy-matches one arbitrary skin.
