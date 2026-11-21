@@ -9,6 +9,7 @@ export function commercialLandingForQuery(query: string): string | null {
     .replace(/\s+/gu, ' ');
   if (/^(?:buy|purchase) (?:cs2 )?skins(?: online)?$/u.test(q)) return '/buy';
   if (/^sell (?:cs2 )?skins(?: online)?$/u.test(q)) return '/sell';
+  if (q === 'cs2 trading sites') return '/cs2-trading-sites';
   if (/^(?:swap|trade) (?:cs2 )?skins$/u.test(q)
     || /^cs2 (?:trade|trading)(?: (?:site|sites|website|websites))?$/u.test(q)
     || /^cs2 skin trading (?:site|sites|website|websites)$/u.test(q)) return '/trades';

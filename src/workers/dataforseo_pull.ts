@@ -1,3 +1,4 @@
+import { commercialLandingForQuery } from "../quality/commercial-intent.js";
 import { loadCheckpoint, saveCheckpoint } from "../dataforseo/checkpoint.js";
 // DataForSEO competitor-gap worker.
 //
@@ -146,6 +147,10 @@ export function suggestTargetPage(keyword: string): string | null {
     const spaced = slug.replace(/-/g, " ");
     if (new RegExp(`(^|\\s)(${slug}|${spaced})(\\s|$)`).test(normalised)) return `/weapons/${slug}`;
   }
+
+  // Plural comparison intent has a dedicated landing.
+  const commercialLanding = commercialLandingForQuery(k);
+  if (commercialLanding === '/cs2-trading-sites') return commercialLanding;
 
   // 2) Intent hubs.
   if (/\b(sell|selling|cash\s?out|withdraw|payout)\b/.test(k)) return "/sell";

@@ -1,3 +1,4 @@
+import { suggestTargetPage } from '../src/workers/dataforseo_pull.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { commercialLandingForQuery } from '../src/quality/commercial-intent.js';
@@ -11,4 +12,12 @@ test('observed pure transactional blog topics route to existing landings',()=>{
 });
 test('distinct informational and integration intents are not blanket-blocked',()=>{
  for(const query of ['how to buy csgo skins online','best sites to buy cs2 skins','buy ak-47 neon revolution','cs2 skin deposit api','cs2 marketplace api integration','sell cs2 skins for crypto','как продать скины на карту','cs20 case contents','stattrak skin prices','cs2 market price history','csgo skin websites review']) assert.equal(commercialLandingForQuery(query),null,query);
+});
+
+test('comparisons and direct swaps have distinct landing pages in both selectors', () => {
+  for (const select of [suggestTargetPage, commercialLandingForQuery]) {
+    assert.equal(select('CS2 trading sites'), '/cs2-trading-sites');
+    assert.equal(select('trade cs2 skins'), '/trades');
+    assert.equal(select('trade-up calculator'), null);
+  }
 });
