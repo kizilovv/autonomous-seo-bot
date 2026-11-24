@@ -94,7 +94,7 @@ export async function runGenerate(): Promise<GenerateStats> {
     const seen = new Set<string>();
     const filteredQueue: typeof queue = [];
     for (const opp of queue) {
-      const surfaceBlock = queryEligibilityIssue(opp.query) || cmsWriteBlockReason(opp.path, opp.field);
+      const surfaceBlock = queryEligibilityIssue(opp.query) || cmsWriteBlockReason(opp.path, opp.field, opp.query);
       if (surfaceBlock) {
         rejectOpportunity(opp.id, surfaceBlock);
         continue;

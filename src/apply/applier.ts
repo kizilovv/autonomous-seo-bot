@@ -138,7 +138,7 @@ export async function runApply(_perBatch = 30): Promise<ApplyStats> {
 
     for (const opp of pending) {
       try {
-        const surfaceBlock = queryEligibilityIssue(opp.query) || cmsWriteBlockReason(opp.path, opp.field);
+        const surfaceBlock = queryEligibilityIssue(opp.query) || cmsWriteBlockReason(opp.path, opp.field, opp.query);
         if (surfaceBlock) {
           stats.blocked++;
           rejectOpportunity(opp.id, surfaceBlock);
