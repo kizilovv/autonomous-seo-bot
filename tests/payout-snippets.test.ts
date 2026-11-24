@@ -10,3 +10,13 @@ test("blog metadata needs a verified brief when the slug or query describes payo
   assert.equal(cmsWriteBlockReason("/sell", "description", "продать скины с выводом"), null);
   assert.equal(cmsWriteBlockReason("/blog/cash-out", null, "cash out"), null);
 });
+
+test("the buy catalogue snippet can only be rewritten for catalogue-wide intent", () => {
+  assert.ok(cmsWriteBlockReason("/buy", "description", "crab rave cs2 купить"));
+  assert.ok(cmsWriteBlockReason("/buy/", "title", "buy ak-47 redline"));
+  assert.ok(cmsWriteBlockReason("/buy", "title", "sell cs2 skins"));
+  assert.equal(cmsWriteBlockReason("/buy", "description", "купить скины кс 2"), null);
+  assert.equal(cmsWriteBlockReason("/buy", "title", "buy cs2 skins"), null);
+  assert.equal(cmsWriteBlockReason("/buy", null, "crab rave cs2 купить"), null);
+  assert.equal(cmsWriteBlockReason("/weapons/ak-47", "description", "buy ak-47 redline"), null);
+});

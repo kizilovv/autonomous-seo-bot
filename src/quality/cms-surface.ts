@@ -1,3 +1,4 @@
+import { commercialLandingForQuery } from "./commercial-intent.js";
 import { unsupportedPayoutTopicIssue } from "./query-eligibility.js";
 
 /** Verified against frontend 5aff6d1c on 2026-10-23: only these layouts mount
@@ -10,6 +11,11 @@ export function bodyCmsRenders(path: string): boolean {
 /** Item metadata is computed from inventory, not CMS overrides. Keep field-null
  * diagnostic opportunities; do not spend on invisible snippet writes. */
 export function cmsWriteBlockReason(path: string, field: string | null, query?: string | null): string | null {
+  // A product query may rank on the catalogue while its item has no stock.
+  // It cannot justify changing the snippet shared by every catalogue visitor.
+  if (path.replace(/\/$/, "") === "/buy" && query && (field === "title" || field === "description") && commercialLandingForQuery(query) !== "/buy") {
+    return "catalogue snippet requires a catalogue-wide buying query";
+  }
   if (path.startsWith("/blog/") && (field === "description" || field === "title")) {
     const slugWords = path.slice("/blog/".length).replace(/[-_]+/g, " ");
     const payoutIssue = unsupportedPayoutTopicIssue(slugWords) || unsupportedPayoutTopicIssue(query ?? "");
